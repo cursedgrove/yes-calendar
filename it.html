@@ -432,6 +432,35 @@ kbd{background:var(--s0);border:1px solid var(--s1);border-bottom-width:2px;bord
 
 .pl-chip { border: 1px solid var(--line, #ddd); border-radius: 14px; padding: 2px 4px 2px 10px; font-size: 13px; }
 
+/* haven't come in for 2+ weeks */
+.m-away{background:color-mix(in srgb,var(--red) 8%,var(--mantle));border:1px solid color-mix(in srgb,var(--red) 35%,var(--s0));border-radius:14px;padding:10px 14px}
+.away-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:132px;overflow:auto}
+.away-chip{border:1px solid var(--s1);background:var(--base);color:var(--text);border-radius:16px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer}
+.away-chip:hover{border-color:var(--red)}
+.away-chip .aw{color:var(--red);font-weight:600;font-size:12px;margin-left:2px}
+.ms-row.away{box-shadow:inset 3px 0 0 var(--red)}
+/* scoreboard */
+.team-tbl.sb td,.team-tbl.sb th{white-space:nowrap}
+.sb-up{display:flex;align-items:center;gap:8px;min-width:110px}.sb-up .mbar{flex:1;margin:0;height:6px}
+.team-tbl tr.sb-tot td{font-weight:600;border-top:2px solid var(--s1);cursor:default}
+/* coverage grid */
+.cv-modal{width:min(1200px,96vw)!important;max-width:96vw!important}
+.cv-wrap{overflow:auto;max-height:64vh;border:1px solid var(--s0);border-radius:8px}
+.cv-tbl{border-collapse:separate;border-spacing:0;font-size:12px}
+.cv-tbl thead th{position:sticky;top:0;background:var(--mantle);z-index:2;font-weight:600;color:var(--sub);padding:4px 2px;text-align:center;min-width:30px;line-height:1.1;border-bottom:1px solid var(--s0)}
+.cv-tbl thead th.cv-now{color:var(--accent)}
+.cv-tbl .cv-name{position:sticky;left:0;background:var(--base);z-index:1;text-align:left;padding:4px 10px;min-width:190px;max-width:240px;font-weight:400;border-right:1px solid var(--s0);border-bottom:1px solid var(--s0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cv-tbl thead .cv-name{z-index:3;background:var(--mantle)}
+.cv-tbl tbody tr{cursor:pointer}.cv-tbl tbody tr:hover .cv-name{background:var(--s0)}
+.cv-away{color:var(--red)}
+td.cv{border-bottom:1px solid var(--s0);border-right:1px solid color-mix(in srgb,var(--s0) 60%,transparent);background:var(--base)}
+td.cv-came,.cv-key i.cv-came{background:color-mix(in srgb,var(--green) 70%,var(--base))}
+td.cv-tried,.cv-key i.cv-tried{background:color-mix(in srgb,var(--peach) 55%,var(--base))}
+td.cv-closed,.cv-key i.cv-closed,.cv-tbl thead th.cv-closed{background:repeating-linear-gradient(45deg,var(--s0) 0 3px,transparent 3px 7px)}
+.cv-tbl tfoot td,.cv-tbl tfoot th{position:sticky;bottom:0;background:var(--mantle);font-size:11px;color:var(--sub);text-align:center;padding:4px 2px;border-top:1px solid var(--s1)}
+.cv-key{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);flex-wrap:wrap}
+.cv-key i{display:inline-block;width:14px;height:14px;border:1px solid var(--s1);border-radius:3px;margin-left:6px;vertical-align:-2px}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -1463,6 +1492,25 @@ const lastCall = (sid, pred = () => true) => M().calls.filter(c => c.student_id 
 const closures = () => (mset().closures || []).filter(c => c && c.start && c.end);
 const closedOn = d => { const k = ymd(d); return closures().find(c => k >= c.start && k <= c.end) || null; };
 const openDay = d => d.getDay() % 6 !== 0 && !closedOn(d);
+/* "haven't seen": a student who hasn't come in for 2+ school weeks (10 open days; weekends and closed weeks don't count) */
+const AWAY_DAYS = 10;
+function openDaysSince(at) {
+  const t = startOfDay(new Date()); let d = addDays(startOfDay(parseD(at)), 1), n = 0;
+  for (let i = 0; i < 400 && d <= t; i++) { if (openDay(d)) n++; d = addDays(d, 1); }
+  return n;
+}
+function lastSeenMap(calls) {
+  const m = new Map();
+  for (const c of calls) if (c.outcome === 'reached') { const p = m.get(c.student_id); if (!p || c.at > p) m.set(c.student_id, c.at); }
+  return m;
+}
+function awayList(students, calls) {
+  const ls = lastSeenMap(calls);
+  return students.filter(s => s.active !== false).map(s => { const at = ls.get(s.id); return { s, at, days: at ? openDaysSince(at) : Infinity }; })
+    .filter(x => x.days >= AWAY_DAYS).sort((a, b) => b.days - a.days || a.s.name.localeCompare(b.s.name));
+}
+const awayText = x => x.at ? `${Math.floor(x.days / 5)} weeks` : 'never came in';
+const awayTitle = x => x.at ? `Last came in ${fmtDateShort(parseD(x.at))} (${x.days} school days ago)` : 'No pull-out where they came in yet';
 function goalsFor(ws) {
   const st = mset(), open = [...Array(7)].map((_, i) => addDays(ws, i)).filter(openDay).length;
   return { ...st, dailyGoal: closedOn(new Date()) ? 0 : +st.dailyGoal, weeklyGoal: Math.round(+st.weeklyGoal * Math.min(open, 5) / 5), openDays: open };
@@ -1573,6 +1621,7 @@ function renderMentor() {
   const done = shown.filter(isDone).sort((a, b) => (lastCall(b.id)?.at || '').localeCompare(lastCall(a.id)?.at || ''));
   const pct = active.length ? Math.round(doneAll.length / active.length * 100) : 0;
   const gDue = gradeDue(isCur ? today : ws), gLeft = dayDiff(today, gDue);
+  const away = awayList(M().students, M().calls), awayIds = new Map(away.map(x => [x.s.id, x]));
 
   const phoneLinks = s => s.phone ? `<a href="${telHref(s.phone)}" title="Call">${esc(s.phone)}</a>` : '';
   const acts = s => IS_ADMIN ? '' : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>`;
@@ -1582,8 +1631,8 @@ function renderMentor() {
     const sub = tries.length
       ? `${tries.length} pull-out${tries.length > 1 ? 's' : ''} this week · last <span class="ob" style="--c:${OUT[lt.outcome]?.c}">${OUT[lt.outcome]?.l}</span> ${relDay(lt.at)}`
       : lr ? `Last came in ${relDay(lr.at)}` : '<span style="color:var(--peach)">Not seen yet</span>';
-    const nd = nextDue(s);
-    return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
+    const nd = nextDue(s), aw = awayIds.get(s.id);
+    return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
   };
   const doneRow = s => {
     const c = lastCall(s.id, x => x.outcome === 'reached') || lastCall(s.id);
@@ -1600,7 +1649,7 @@ function renderMentor() {
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && mentors.length > 1 ? `<select id="mmentor"><option value="">All mentors</option>${mentors.map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -1620,6 +1669,8 @@ function renderMentor() {
     </div>
     <div class="m-week"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Check-ins per day</b><span class="muted sm">goal: ${st.dailyGoal}/day</span></div>
       <div class="m-days">${st.dailyGoal ? `<div class="goal-line" style="bottom:calc(${st.dailyGoal / maxDay * 100}% * 0.78 + 22px)"></div>` : ''}${days.map((d, i) => { const v = perDay[i]; return `<div class="m-day ${v >= st.dailyGoal && v ? 'met' : v ? 'part' : ''} ${sameDay(d, today) ? 'today' : ''}" title="${fmtDateShort(d)}: ${v}"><span>${v || ''}</span><div class="b" style="height:${v / maxDay * 78}%"></div><span>${closedOn(d) ? 'closed' : DAYS[d.getDay()] + ' ' + d.getDate()}</span></div>`; }).join('')}</div></div>
+    ${away.length && M().students.length ? `<div class="m-away"><div class="row" style="justify-content:space-between;align-items:baseline"><b>Haven't come in for 2+ weeks <span class="muted">(${away.length})</span></b><span class="muted sm">school days only · closed weeks don't count</span></div>
+      <div class="away-chips">${away.map(x => `<button class="away-chip" data-sid="${x.s.id}" data-mstu title="${esc(awayTitle(x))}">${esc(x.s.name)}${IS_ADMIN && !S.mmentor && x.s.mentor ? ` <span class="muted">· ${esc(x.s.mentor)}</span>` : ''} <span class="aw">${awayText(x)}</span></button>`).join('')}</div></div>` : ''}
     <div class="m-cols">
       <div class="m-list"><h3><span>${st.openDays === 0 ? 'Still due (room closed this week)' : 'Due this week'} <span class="muted">(${need.length})</span></span></h3>${need.map(needRow).join('') || `<div class="m-empty">${active.length ? (q ? 'No matches' : 'Nobody else is due this week.') : 'No students yet'}</div>`}</div>
       <div class="m-list"><h3><span>Up to date <span class="muted">(${done.length})</span></span></h3>${done.map(doneRow).join('') || '<div class="m-empty">Nobody yet</div>'}</div>
@@ -1640,6 +1691,7 @@ function renderMentor() {
     if (a === 'sync') return openSync();
     if (a === 'send') return openSend();
     if (a === 'logins') return openLogins();
+    if (a === 'coverage') return openCoverage();
     if (a === 'ittools') return openIT();
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
     if (a === 'roster') return openRoster();
@@ -1664,9 +1716,18 @@ function gradeReminder() {
   store.set(key, ymd(new Date()));
   toast(`Reminder: grade check-ins are due ${left === 0 ? 'today' : 'tomorrow'} (${fmtDateShort(d)})`, { duration: 12000 });
 }
+function awayReminder() {
+  if (IS_ADMIN) return;
+  const key = 'yes.awayToast.' + LS_KEY;
+  if (store.get(key) === ymd(new Date()) || !openDay(new Date())) return;
+  const n = awayList(M().students, M().calls).length; if (!n) return;
+  store.set(key, ymd(new Date()));
+  toast(`${n} student${n > 1 ? "s haven't" : " hasn't"} come in for 2+ weeks. They're at the top of Mentoring.`, { duration: 10000 });
+}
 function renderMentorCard() {
   if (IS_ADMIN && $('#viewAs')) renderViewAs();
   setTimeout(gradeReminder, 800);
+  setTimeout(awayReminder, 1600);
   const tg = $('#ciToggle');
   if (tg) { tg.checked = S.settings.showCheckins !== false; tg.onchange = () => saveSettings({ showCheckins: tg.checked }); }
   const el = $('#mentorCard'); if (!el) return;
@@ -1677,7 +1738,8 @@ function renderMentorCard() {
   const we = addDays(ws, 6), byS = new Map();
   for (const c of w) { if (!byS.has(c.student_id)) byS.set(c.student_id, []); byS.get(c.student_id).push(c); }
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
-  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}/${st.dailyGoal}</b></span><span>Week <b>${w.filter(countsGoal).length}/${st.weeklyGoal}</b></span></div><div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div><div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div></div>`;
+  const awayN = awayList(M().students, M().calls).length;
+  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}/${st.dailyGoal}</b></span><span>Week <b>${w.filter(countsGoal).length}/${st.weeklyGoal}</b></span></div><div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div><div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
   el.onclick = () => { closeSidebar(); setView('mentor'); };
 }
 
@@ -1939,16 +2001,84 @@ function teamCard(ws, we) {
   if (window.YES_ADMIN?.test && syncOn()) note += " Mentors who haven't synced yet show sample data.";
   if (window.YES_ADMIN?.baseline && syncOn()) note += " Mentors who haven't signed in yet show what's in their planner.";
   if (!names.length) return `<div class="card team-card"><h4>Team</h4><p class="muted sm">${note}</p><p class="muted">No mentors have synced yet.</p></div>`;
+  const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+  const rateCell = (p, good = 70, ok = 40) => p == null ? '<span class="muted">–</span>' : `<b style="color:${p >= good ? 'var(--green)' : p >= ok ? 'var(--peach)' : 'var(--red)'}">${p}%</b>`;
+  const tot = { st: 0, pulls: 0, came: 0, upd: 0, away: 0 };
   const rows = names.map(n => {
     const st = Mall().students.filter(s => s.mentor === n && s.active !== false), ids = new Set(st.map(s => s.id));
+    const all = Mall().calls.filter(c => ids.has(c.student_id));
     const mine = wc.filter(c => ids.has(c.student_id)), came = mine.filter(c => c.outcome === 'reached').length;
-    const due = st.filter(s => !upToDate(s, we, mine.filter(c => c.student_id === s.id))).length;
-    const lastPull = Mall().calls.filter(c => ids.has(c.student_id)).map(c => c.at).sort().pop();
+    const upd = st.filter(s => upToDate(s, we, mine.filter(c => c.student_id === s.id))).length;
+    const away = awayList(st, all).length;
+    const lastPull = all.map(c => c.at).sort().pop();
     const src = st[0]?.src, synced = src && last[src];
-    return `<tr data-tm="${esc(n)}" class="${S.mmentor === n ? 'sel' : ''}"><td><b>${esc(n)}</b>${src && src !== n ? ` <span class="muted sm">(on ${esc(src)}'s list)</span>` : ''}</td><td>${st.length}</td><td><span style="color:var(--green)">${came} came in</span> · <span style="color:var(--red)">${mine.length - came} didn't</span></td><td>${due}</td><td>${lastPull ? relDay(lastPull) : '–'}</td><td class="muted">${synced ? esc(syncWhen(synced)) : window.YES_ADMIN?.test && src ? 'sample data' : window.YES_ADMIN?.baseline && src ? 'from planner' : '–'}</td></tr>`;
+    tot.st += st.length; tot.pulls += mine.length; tot.came += came; tot.upd += upd; tot.away += away;
+    const up = pct(upd, st.length);
+    return `<tr data-tm="${esc(n)}" class="${S.mmentor === n ? 'sel' : ''}"><td><b>${esc(n)}</b>${src && src !== n ? ` <span class="muted sm">(on ${esc(src)}'s list)</span>` : ''}</td><td>${st.length}</td>
+      <td>${mine.length ? `${mine.length} <span class="muted sm">(<span style="color:var(--green)">${came} came</span>, <span style="color:var(--red)">${mine.length - came} didn't</span>)</span>` : '<span class="muted">none</span>'}</td>
+      <td>${rateCell(pct(came, mine.length))}</td>
+      <td><div class="sb-up"><span>${upd}/${st.length}</span><div class="mbar"><div style="width:${up || 0}%"></div></div></div></td>
+      <td>${away ? `<b style="color:var(--red)">${away}</b>` : '<span style="color:var(--green)">0</span>'}</td>
+      <td>${lastPull ? relDay(lastPull) : '–'}</td><td class="muted">${synced ? esc(syncWhen(synced)) : window.YES_ADMIN?.test && src ? 'sample data' : window.YES_ADMIN?.baseline && src ? 'from planner' : '–'}</td></tr>`;
   }).join('');
-  return `<div class="card team-card"><div class="row" style="justify-content:space-between"><h4 style="margin:0">Team this week</h4>${S.mmentor ? '<button class="btn sm" data-tmall>Show everyone</button>' : ''}</div><p class="muted sm" style="margin:4px 0 8px">${note}</p>
-  <table class="team-tbl"><thead><tr><th>Mentor</th><th>Students</th><th>This week</th><th>Still due</th><th>Last pull-out</th><th>Last synced</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const totRow = names.length > 1 ? `<tr class="sb-tot"><td>Whole team</td><td>${tot.st}</td><td>${tot.pulls} <span class="muted sm">(${tot.came} came)</span></td><td>${rateCell(pct(tot.came, tot.pulls))}</td><td>${tot.upd}/${tot.st} <span class="muted sm">(${pct(tot.upd, tot.st) ?? 0}%)</span></td><td>${tot.away ? `<b style="color:var(--red)">${tot.away}</b>` : '0'}</td><td></td><td></td></tr>` : '';
+  const wkLabel = sameDay(ws, startOfWeek(new Date())) ? 'this week' : `week of ${fmtDateShort(ws)}`;
+  return `<div class="card team-card"><div class="row" style="justify-content:space-between"><h4 style="margin:0">Team scoreboard · ${wkLabel}</h4><span class="row" style="gap:6px">${S.mmentor ? '<button class="btn sm" data-tmall>Show everyone</button>' : ''}<button class="btn sm" data-mact="coverage">Coverage grid</button></span></div><p class="muted sm" style="margin:4px 0 8px">${note}</p>
+  <div style="overflow-x:auto"><table class="team-tbl sb"><thead><tr><th>Mentor</th><th>Students</th><th>Pull-outs</th><th title="Of this week's pull-outs, how many students came in">Came-in rate</th><th title="Students who don't need another check-in this week">Up to date</th><th title="Students who haven't come in for 2+ school weeks">Not seen 2+ wks</th><th>Last pull-out</th><th>Last synced</th></tr></thead><tbody>${rows}${totRow}</tbody></table></div>
+  <div class="muted sm" style="margin-top:6px">Click a mentor to see only their calendar. Use the arrows at the top to look at other weeks.</div></div>`;
+}
+/* ---------- admin: coverage grid, every student week by week ---------- */
+function openCoverage() {
+  const list = M().students.filter(s => s.active !== false);
+  const calls = M().calls, today = startOfDay(new Date()), thisWk = startOfWeek(today);
+  const first = calls.map(c => c.at).sort()[0];
+  let start = first ? startOfWeek(parseD(first)) : addDays(thisWk, -7 * 7);
+  if (dayDiff(start, thisWk) > 7 * 26) start = addDays(thisWk, -7 * 26);   // at most half a year
+  const weeks = []; for (let w = start; w <= thisWk; w = addDays(w, 7)) weeks.push(w);
+  const cell = new Map();   // sid|week -> 'came' | 'tried'
+  for (const c of calls) {
+    const k = c.student_id + '|' + ymd(startOfWeek(parseD(c.at)));
+    if (c.outcome === 'reached') cell.set(k, 'came'); else if (!cell.has(k)) cell.set(k, 'tried');
+  }
+  const weekClosed = w => [...Array(7)].map((_, i) => addDays(w, i)).filter(d => d.getDay() % 6).every(d => closedOn(d));
+  const awayM = new Map(awayList(list, calls).map(x => [x.s.id, x]));
+  const seenWeeks = s => weeks.filter(w => cell.get(s.id + '|' + ymd(w)) === 'came').length;
+  const sorts = {
+    gap: (a, b) => ((awayM.get(b.id)?.days ?? 0) - (awayM.get(a.id)?.days ?? 0)) || a.name.localeCompare(b.name),
+    name: (a, b) => a.name.localeCompare(b.name),
+    mentor: (a, b) => (a.mentor || '').localeCompare(b.mentor || '') || a.name.localeCompare(b.name),
+    least: (a, b) => seenWeeks(a) - seenWeeks(b) || a.name.localeCompare(b.name),
+  };
+  const openW = weeks.filter(w => !weekClosed(w));
+  const draw = (sortBy) => {
+    const rows = list.slice().sort(sorts[sortBy]);
+    const head = weeks.map(w => `<th class="${weekClosed(w) ? 'cv-closed' : ''} ${sameDay(w, thisWk) ? 'cv-now' : ''}" title="Week of ${fmtDateShort(w)}">${MONTHS_S[w.getMonth()]}<br>${w.getDate()}</th>`).join('');
+    const body = rows.map(s => {
+      const aw = awayM.get(s.id), n = seenWeeks(s);
+      return `<tr data-cvs="${s.id}"><th class="cv-name"><b>${esc(s.name)}</b>${IS_ADMIN && !S.mmentor && s.mentor ? `<span class="muted sm"> · ${esc(s.mentor)}</span>` : ''}<div class="sm ${aw ? 'cv-away' : 'muted'}">${aw ? (aw.at ? 'not seen in ' + awayText(aw) : 'never came in') : `seen ${n} of ${openW.length} weeks`}</div></th>${weeks.map(w => {
+        const v = cell.get(s.id + '|' + ymd(w)), cl = weekClosed(w);
+        return `<td class="cv ${v ? 'cv-' + v : cl ? 'cv-closed' : ''}" title="${esc(s.name)} · week of ${fmtDateShort(w)}: ${v === 'came' ? 'came in' : v === 'tried' ? "pulled, didn't come in" : cl ? 'IYT room closed' : 'no pull-out'}"></td>`;
+      }).join('')}</tr>`;
+    }).join('');
+    const foot = `<tr class="cv-foot"><th class="cv-name">Seen that week</th>${weeks.map(w => { const n = rows.filter(s => cell.get(s.id + '|' + ymd(w)) === 'came').length, p = rows.length ? Math.round(n / rows.length * 100) : 0; return `<td title="${n} of ${rows.length} students came in">${weekClosed(w) ? '' : p + '%'}</td>`; }).join('')}</tr>`;
+    $('#cvWrap').innerHTML = `<table class="cv-tbl"><thead><tr><th class="cv-name">Student</th>${head}</tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`;
+    const w = $('#cvWrap'); w.scrollLeft = w.scrollWidth;
+  };
+  openModal(`<div class="m-head"><h2>Coverage${S.mmentor ? ' · ' + esc(S.mmentor) : IS_ADMIN ? ' · everyone' : ''} <span class="muted" style="font-size:14px">(${list.length} students, ${weeks.length} weeks)</span></h2><button class="iconbtn" data-x>✕</button></div>
+  <div class="m-body"><div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:8px"><label class="row" style="gap:6px">Sort <select id="cvSort"><option value="gap">Longest since seen</option><option value="least">Fewest weeks seen</option><option value="name">Name</option>${IS_ADMIN && !S.mmentor ? '<option value="mentor">Mentor</option>' : ''}</select></label>
+    <span class="cv-key"><i class="cv-came"></i>came in <i class="cv-tried"></i>pulled, didn't come in <i></i>no pull-out <i class="cv-closed"></i>room closed</span></div>
+    ${list.length ? '<div id="cvWrap" class="cv-wrap"></div>' : '<p class="muted">No students to show.</p>'}</div>
+  <div class="m-foot"><button class="btn left" data-cvcsv>Download (.csv)</button><button class="btn primary" data-x>Done</button></div>`, 'lg cv-modal');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  if (!list.length) return;
+  draw('gap');
+  $('#cvSort').onchange = e => draw(e.target.value);
+  $('#cvWrap').onclick = e => { const r = e.target.closest('[data-cvs]'); if (r) openStudent(stuById(+r.dataset.cvs)); };
+  $('#modal [data-cvcsv]').onclick = () => {
+    const rows = [['Student', 'Mentor', ...weeks.map(w => 'Week of ' + ymd(w))]];
+    for (const s of list.slice().sort(sorts.mentor)) rows.push([s.name, s.mentor || '', ...weeks.map(w => { const v = cell.get(s.id + '|' + ymd(w)); return v === 'came' ? 'came in' : v === 'tried' ? "didn't come in" : weekClosed(w) ? 'closed' : ''; })]);
+    downloadText(`coverage-${S.mmentor || 'team'}-${ymd(today)}.csv`, rows.map(r => r.map(csvCell).join(',')).join('\r\n'), 'text/csv');
+  };
 }
 document.addEventListener('click', e => {
   if (!IS_ADMIN) return;
@@ -2907,8 +3037,14 @@ async function openIT() {
     <div class="row" style="flex-wrap:wrap;gap:6px;margin:6px 0">${(st.planners || []).map(n => `<span class="pl-chip" data-pln="${esc(n)}">${esc(n)} <button class="linkbtn" data-pldel title="Delete this planner">✕</button></span>`).join('') || '<span class="muted sm">None yet.</span>'}</div>
     <div class="row" style="gap:8px;flex-wrap:wrap"><label class="btn">Upload a planner (Excel/PDF)<input type="file" id="it_plfile" accept=".xlsx,.pdf" hidden></label>
       <span class="muted sm">or let</span><input id="it_uses_name" placeholder="mentor" style="width:110px"><span class="muted sm">work with</span><input id="it_uses_of" placeholder="whose students" style="width:130px"><button class="btn" id="it_uses_go">Save</button></div>
-    <h4 style="margin:14px 0 4px">Backup</h4>
-    <div class="row" style="gap:8px"><button class="btn" id="it_backup">Download backup of the Sheet</button><span class="muted sm">Everything except passcodes, as a .json file.</span></div>
+    <h4 style="margin:14px 0 4px">Backups</h4>
+    <div class="it-bk">
+      <div class="row" style="gap:8px;flex-wrap:wrap">${st.nightly ? '<b style="color:var(--green)">Nightly backup is on</b>' : st.version >= 6 ? '<b style="color:var(--peach)">Nightly backup is off</b> <button class="btn sm" id="it_nightly">Turn on</button>' : '<b style="color:var(--peach)">Nightly backup needs script v6</b>'}
+        <span class="muted sm">${st.lastBackup ? 'Last saved ' + esc(syncWhen(st.lastBackup)) : 'No backups yet'}${st.lastBackupError ? ` · <span style="color:var(--red)">last try failed: ${esc(st.lastBackupError)}</span>` : ''}</span></div>
+      <div class="muted sm">Every night around 2 AM the Sheet is saved to the "Yes Calendar backups" folder in Google Drive. The last 30 are kept. Restoring one puts students, pull-outs, sent events and planners back the way they were. Passcodes stay as they are now, and the current state is saved first so a restore can be undone.</div>
+      <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">${st.version >= 6 ? '<button class="btn" id="it_bknow">Back up now</button><button class="btn" id="it_bklist">Restore a backup...</button>' : ''}<button class="btn" id="it_backup">Download a copy (.json)</button></div>
+      <div id="it_bks"></div>
+    </div>
     <h4 style="margin:14px 0 4px;color:var(--red)">Start over</h4>
     <div class="it-danger">
       <label class="row"><input type="checkbox" value="data"> All synced students, pull-outs and the mentors list</label>
@@ -2954,6 +3090,29 @@ async function openIT() {
       const r = await syncCall({ action: 'it-planner-put', name, planner: { roster: own, checkins } });
       toast(`Saved ${r.name}'s planner: ${r.students} students, ${r.calls} pull-outs.`, { duration: 8000 }); await reseedTeam(); openIT();
     } catch (err) { msg("Couldn't read that file: " + err.message, true); }
+  };
+  if ($('#it_nightly')) $('#it_nightly').onclick = async () => {
+    try { await syncCall({ action: 'it-nightly-on' }); toast('Nightly backup is on.'); openIT(); }
+    catch (e) { msg('Couldn\'t turn it on from here (' + e.message + '). In the Apps Script editor, pick installNightlyBackup and press Run once.', true); }
+  };
+  if ($('#it_bknow')) $('#it_bknow').onclick = async () => {
+    msg('Saving a backup...');
+    try { const r = await syncCall({ action: 'it-backup-now' }); toast('Backup saved: ' + r.name, { duration: 8000 }); openIT(); } catch (e) { msg(e.message, true); }
+  };
+  if ($('#it_bklist')) $('#it_bklist').onclick = async () => {
+    const box = $('#it_bks'); box.innerHTML = '<p class="muted sm">Loading backups...</p>';
+    try {
+      const r = await syncCall({ action: 'it-backups' });
+      if (!r.backups.length) { box.innerHTML = '<p class="muted sm">No backups yet. Press "Back up now" to make the first one.</p>'; return; }
+      box.innerHTML = `<div class="an-list" style="margin-top:6px">${r.backups.map(b => { const d = new Date(b.made); return `<div class="an-item" data-bk="${esc(b.id)}"><span><b>${fmtDateShort(d)} ${fmtTime(d)}</b> <span class="muted sm">${esc((b.name.match(/\(([^)]+)\)\.json$/) || [])[1] || 'nightly')} · ${Math.max(1, Math.round(b.size / 1024))} KB</span></span><button class="btn sm" data-bkgo>Restore</button></div>`; }).join('')}</div>`;
+      $$('#it_bks [data-bkgo]').forEach(btn => { btn.onclick = async () => {
+        const row = btn.closest('[data-bk]'), when = row.querySelector('b').textContent;
+        if (prompt(`Put the team Sheet back to how it was on ${when}?\n\nEverything synced since then is replaced (mentors' calendars send their latest again on their next sync). Type RESTORE to confirm.`) !== 'RESTORE') return msg('Restore cancelled.');
+        msg('Restoring...');
+        try { const x = await syncCall({ action: 'it-restore', id: row.dataset.bk }); await reseedTeam(); toast(`Restored the Sheet to ${x.from}. The way it was just before is saved too, in case you need to undo.`, { duration: 10000 }); openIT(); }
+        catch (e) { msg(e.message, true); }
+      }; });
+    } catch (e) { box.innerHTML = `<p class="sm" style="color:var(--red)">${esc(e.message)}</p>`; }
   };
   $('#it_backup').onclick = async () => {
     try { const r = await syncCall({ action: 'it-backup' }); downloadText(`Yes Calendar team backup ${ymd(new Date())}.json`, JSON.stringify(r, null, 1), 'application/json'); msg('Backup downloaded.'); } catch (e) { msg(e.message, true); }
