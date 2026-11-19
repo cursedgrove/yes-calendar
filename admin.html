@@ -501,6 +501,8 @@ html[data-season] .topbar{position:relative}
 html[data-season="christmas"] .topbar{box-shadow:inset 0 -4px 0 0 transparent;border-bottom:4px solid transparent;border-image:repeating-linear-gradient(45deg,#c0392b 0 10px,#ffffff 10px 20px,#1f7a3a 20px 30px,#ffffff 30px 40px) 4}
 html[data-season="halloween"] .topbar{border-bottom:4px solid transparent;border-image:repeating-linear-gradient(45deg,#ff8a1f 0 10px,#16111b 10px 20px) 4}
 html[data-season="spring"] .topbar{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,#f7b2c8,#fde68a,#a7e3b5,#b9d4f5,#d9b8f0) 4}
+html[data-season="fall"] .topbar{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,#b8331f,#d9822b,#e6b13a,#6b7f2a,#8e4b5e) 4}
+html[data-season="winter"] .topbar{border-bottom:4px solid transparent;border-image:repeating-linear-gradient(45deg,#cfe3f5 0 10px,#ffffff 10px 20px,#8fb8de 20px 30px,#ffffff 30px 40px) 4}
 html[data-season="summer"] .topbar{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,#ffd166,#ff9f1c,#0e7ea8,#4fb3d9) 4}
 /* seasonal themes: top bar buttons like Classic (light text on the colored bar) */
 html[data-season]:not([data-season=""]) .topbar .btn,html[data-season]:not([data-season=""]) .topbar .seg button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);color:var(--topbar-text)}
@@ -1411,16 +1413,19 @@ const THEMES = {
   halloween: { name: 'Halloween', season: true, mode: 'mocha', v: { base: '#1c1622', mantle: '#16111b', crust: '#100c14', s0: '#2c2333', s1: '#3b2f44', s2: '#4c3d57', o0: '#6d5a7a', o1: '#857094', text: '#f3e9dc', sub: '#c9b8a6', sub1: '#e2d4c3', blue: '#ff8a1f', red: '#ff5a4d', green: '#9ccc4a', peach: '#ff8a1f', yellow: '#ffc94a', mauve: '#b07ae6', accent: '#ff8a1f', 'on-accent': '#1c1622', topbar: '#2a1832', 'topbar-text': '#ffd9b0', 'today-bg': '#3a2416' } },
   spring: { name: 'Spring', season: true, mode: 'latte', v: { base: '#fbfff9', mantle: '#f1f8ee', crust: '#e3efdf', s0: '#e5efe1', s1: '#cddfc7', s2: '#b5ceae', o0: '#8fa889', o1: '#7a9374', text: '#24301f', sub: '#55654f', sub1: '#36432f', blue: '#4f9d69', red: '#d64f7a', green: '#4f9d69', peach: '#ee8a5c', yellow: '#c9a227', mauve: '#b06ab3', accent: '#d64f7a', 'on-accent': '#ffffff', topbar: '#5a9e6f', 'topbar-text': '#ffffff', 'today-bg': '#fde6ef' } },
   summer: { name: 'Summer', season: true, mode: 'latte', v: { base: '#fffdf6', mantle: '#fdf5e2', crust: '#f6e9c9', s0: '#f3e8cd', s1: '#e3d3ac', s2: '#cdb98b', o0: '#a8946a', o1: '#937f57', text: '#1f2a33', sub: '#4d5a63', sub1: '#2f3b44', blue: '#0f86b3', red: '#e0533d', green: '#2f9e5b', peach: '#ff9f1c', yellow: '#e6a700', mauve: '#7a5cc7', accent: '#0f86b3', 'on-accent': '#ffffff', topbar: '#0e7ea8', 'topbar-text': '#ffffff', 'today-bg': '#fff1c9' } },
+  fall: { name: 'Fall', season: true, mode: 'latte', v: { base: '#fffaf3', mantle: '#f8eee0', crust: '#eedcc4', s0: '#efe2cf', s1: '#dcc8aa', s2: '#c6ad88', o0: '#a08866', o1: '#8a7253', text: '#2e2117', sub: '#5f4a38', sub1: '#3f2f22', blue: '#b5541c', red: '#b8331f', green: '#6b7f2a', peach: '#d9822b', yellow: '#c48a12', mauve: '#8e4b5e', accent: '#b5541c', 'on-accent': '#ffffff', topbar: '#6e3418', 'topbar-text': '#fff3e0', 'today-bg': '#fde6cc' } },
+  winter: { name: 'Winter', season: true, mode: 'latte', v: { base: '#f9fcff', mantle: '#eef4fa', crust: '#dfe8f2', s0: '#e2eaf3', s1: '#c7d4e3', s2: '#aebfd3', o0: '#8798ad', o1: '#728499', text: '#1c2733', sub: '#4b5a6b', sub1: '#2c3a4a', blue: '#2f6fae', red: '#c0392b', green: '#2e8b6a', peach: '#d9822b', yellow: '#b8860b', mauve: '#6d5bb5', accent: '#2f6fae', 'on-accent': '#ffffff', topbar: '#24496f', 'topbar-text': '#ffffff', 'today-bg': '#e3f0fc' } },
   seasonal: { name: 'Seasonal (changes with the time of year)', mode: 'season' },
 };
-// which seasonal theme fits a date: Halloween in October, Christmas in December (through Jan 6), spring Mar-May, summer Jun-Aug
+// which seasonal theme fits a date: winter Jan-Feb, spring Mar-May, summer Jun-Aug, fall Sep & Nov, Halloween in October, Christmas in December (through Jan 6)
 function seasonFor(d = new Date()) {
   const m = d.getMonth() + 1, day = d.getDate();
   if (m === 12 || (m === 1 && day <= 6)) return 'christmas';
+  if (m <= 2) return 'winter';
+  if (m <= 5) return 'spring';
+  if (m <= 8) return 'summer';
   if (m === 10 || (m === 11 && day === 1)) return 'halloween';
-  if (m >= 3 && m <= 5) return 'spring';
-  if (m >= 6 && m <= 8) return 'summer';
-  return '';
+  return 'fall';   // September and November
 }
 const themeKey = () => S.settings.theme === 'seasonal' ? (seasonFor() || 'classic') : (THEMES[S.settings.theme] ? S.settings.theme : 'mocha');
 const THEME_VARS = ['topbar', 'topbar-text', 'today-bg', 'base', 'mantle', 'crust', 's0', 's1', 's2', 'o0', 'o1', 'text', 'sub', 'sub1', 'blue', 'red', 'green', 'peach', 'yellow', 'mauve', 'on-accent', 'accent'];
@@ -1446,7 +1451,7 @@ function applyTheme() {
 /* ---------- seasonal decorations: falling snow, leaves and bats, petals, summer bubbles (animated or still) ---------- */
 const DECOR = { run: 0, raf: 0, kind: '', mode: '' };
 function startDecor(kind, mode) {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches && mode === 'animated') mode = 'still';
+  // "Animated" is the person's own pick in the Theme menu, so it animates even when the computer has animation effects turned off
   if (DECOR.kind === kind && DECOR.mode === mode && (kind ? $('#decor') : true)) return;
   DECOR.kind = kind; DECOR.mode = mode; DECOR.run++; cancelAnimationFrame(DECOR.raf);
   let cv = $('#decor');
@@ -1460,15 +1465,17 @@ function startDecor(kind, mode) {
     christmas: { n: 55, make: () => ({ t: Math.random() < 0.18 ? '❄' : 'dot', r: R(1.5, 3.6), vy: R(0.35, 1.1), vx: R(-0.3, 0.3), sway: R(0.4, 1.4), a: R(0.45, 0.9), s: R(12, 20) }) },
     halloween: { n: 16, make: () => ({ t: Math.random() < 0.35 ? '🦇' : Math.random() < 0.5 ? '🍂' : '🎃', vy: R(0.25, 0.7), vx: R(-0.6, 0.6), sway: R(0.6, 1.8), a: R(0.35, 0.7), s: R(14, 22), rot: R(0, 6), vr: R(-0.02, 0.02) }) },
     spring: { n: 22, make: () => ({ t: Math.random() < 0.8 ? '🌸' : '🦋', vy: R(0.3, 0.8), vx: R(0.1, 0.6), sway: R(0.6, 1.6), a: R(0.4, 0.75), s: R(12, 18), rot: R(0, 6), vr: R(-0.02, 0.02) }) },
+    fall: { n: 22, make: () => ({ t: Math.random() < 0.55 ? '🍂' : '🍁', vy: R(0.3, 0.8), vx: R(-0.4, 0.4), sway: R(0.8, 2), a: R(0.45, 0.8), s: R(13, 20), rot: R(0, 6), vr: R(-0.025, 0.025) }) },
+    winter: { n: 60, make: () => ({ t: Math.random() < 0.15 ? '❄' : 'dot', r: R(1.5, 3.4), vy: R(0.35, 1), vx: R(-0.3, 0.3), sway: R(0.4, 1.4), a: R(0.45, 0.9), s: R(12, 20) }) },
     summer: { n: 24, make: () => ({ t: Math.random() < 0.12 ? '☀️' : 'bubble', r: R(3, 9), vy: -R(0.25, 0.7), vx: R(-0.2, 0.2), sway: R(0.4, 1.2), a: R(0.25, 0.5), s: R(14, 20) }) },
   };
   const K = kinds[kind]; if (!K) return;
   const ps = Array.from({ length: Math.round(K.n * Math.min(1.5, W() / 1300)) }, () => ({ ...K.make(), x: R(0, W()), y: R(0, H()), ph: R(0, 6.28) }));
   const one = (p, t) => {
     ctx.globalAlpha = p.a;
-    if (p.t === 'dot') { ctx.fillStyle = kind === 'christmas' && document.documentElement.dataset.theme === 'latte' ? '#b9d4ea' : '#ffffff'; ctx.beginPath(); ctx.arc(p.x + Math.sin(t / 900 + p.ph) * 6 * p.sway, p.y, p.r, 0, 6.28); ctx.fill(); return; }
+    if (p.t === 'dot') { ctx.fillStyle = document.documentElement.dataset.theme === 'latte' ? '#9fc3e3' : '#ffffff'; ctx.beginPath(); ctx.arc(p.x + Math.sin(t / 900 + p.ph) * 6 * p.sway, p.y, p.r, 0, 6.28); ctx.fill(); return; }
     if (p.t === 'bubble') { ctx.strokeStyle = '#4fb3d9'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(p.x + Math.sin(t / 1100 + p.ph) * 5 * p.sway, p.y, p.r, 0, 6.28); ctx.stroke(); return; }
-    ctx.save(); ctx.translate(p.x + Math.sin(t / 1000 + p.ph) * 8 * p.sway, p.y); if (p.rot != null) ctx.rotate(p.rot); ctx.font = `${p.s}px system-ui, "Segoe UI Emoji", "Apple Color Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(p.t, 0, 0); ctx.restore();
+    ctx.save(); ctx.translate(p.x + Math.sin(t / 1000 + p.ph) * 8 * p.sway, p.y); if (p.rot != null) ctx.rotate(p.rot); ctx.font = `${p.s}px system-ui, "Segoe UI Emoji", "Apple Color Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = p.t === '❄' && document.documentElement.dataset.theme === 'latte' ? '#7fb0dc' : '#fff'; ctx.fillText(p.t, 0, 0); ctx.restore();
   };
   function draw(t) {
     ctx.clearRect(0, 0, W(), H());
@@ -1496,7 +1503,7 @@ function startDecor(kind, mode) {
 
 /* ---------- the Theme button: pick a look, and whether seasonal decorations move ---------- */
 function openThemePicker() {
-  const cur = S.settings.theme, list = ['classic', 'mocha', 'latte', 'seasonal', 'christmas', 'halloween', 'spring', 'summer'];
+  const cur = S.settings.theme, list = ['classic', 'mocha', 'latte', 'seasonal', 'christmas', 'winter', 'spring', 'summer', 'fall', 'halloween'];
   const sw = k => { const v = (THEMES[k] && THEMES[k].v) || (k === 'mocha' ? { topbar: '#181825', base: '#1e1e2e', accent: '#89b4fa' } : k === 'latte' ? { topbar: '#e6e9ef', base: '#eff1f5', accent: '#1e66f5' } : { topbar: '#888', base: '#ddd', accent: '#555' });
     return `<span class="tp-sw" style="--a:${v.topbar || v.mantle};--b:${v.base};--c:${v.accent || v.blue}"></span>`; };
   const label = k => k === 'seasonal' ? `Seasonal <span class="muted sm">(now: ${THEMES[seasonFor() || 'classic'].name})</span>` : esc(THEMES[k].name.replace(/ \(.*\)$/, ''));
@@ -3808,7 +3815,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119133412';
+const BUILD_ID = '20261119135008';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
