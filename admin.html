@@ -516,6 +516,9 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .note-box{background:color-mix(in srgb,var(--yellow) 16%,var(--base));border:1px solid color-mix(in srgb,var(--yellow) 55%,var(--s0));border-radius:10px;padding:8px 10px;margin-bottom:6px;display:flex;flex-direction:column;gap:2px}
 .note-b{cursor:help}
 
+.g-ok{margin-top:6px;display:inline-flex;align-items:center;gap:8px;padding:3px 10px;border-radius:999px;background:color-mix(in srgb,var(--green) 18%,transparent);color:var(--green);font-weight:700;font-size:13px}
+.g-ok .linkbtn{font-weight:400}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -826,7 +829,7 @@ const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dai
 function gradeFix(st) {
   if (!st.goalFix3) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix3 = true; }   // IYT goal: 10 students in a day
   // an "I did them" pressed early (Nov 14 - Dec 7) didn't really finish a round: back to the last real one
-  if (!st.gradeFix2) { if (st.gradeLast > '2026-11-13' && st.gradeLast < '2026-12-08') st.gradeLast = '2026-11-13'; st.gradeFix2 = true; }
+  st.gradeFix2 = true;
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
   return st;
 }
@@ -1177,6 +1180,7 @@ async function api(method, path, body = {}) {
     if ('gradeEvery' in body) st.gradeEvery = Math.max(1, Math.min(90, Math.round(+body.gradeEvery || 14)));
     if ('gradeAnchor' in body && DATE_RE.test(body.gradeAnchor || '')) st.gradeAnchor = body.gradeAnchor;
     if ('gradeLast' in body && DATE_RE.test(body.gradeLast || '')) st.gradeLast = body.gradeLast;
+    if ('gradeDoneFor' in body) st.gradeDoneFor = DATE_RE.test(body.gradeDoneFor || '') ? body.gradeDoneFor : '';
     if ('everyDays' in body) st.everyDays = Math.max(1, Math.min(90, Math.round(+body.everyDays || 14)));
     saveDB(); return out(st);
   }
@@ -1749,6 +1753,7 @@ function gradeDates(from, to) {
   for (let d = addDays(a, (Math.ceil(dayDiff(a, f) / n) - 1) * n), k = 0; k < 400; d = addDays(d, n), k++) {
     const s = d;                                                                // every 2 weeks, always on Friday
     if (last && dayDiff(last, s) <= 6) continue;                                // already done that week
+    if (st.gradeDoneFor && ymd(s) === st.gradeDoneFor) continue;               // marked done ahead of time ("I did grade check-ins")
     if (closedOn(s)) continue;                                                  // closed week (Thanksgiving etc.): skipped
     if (s < f) continue;
     if (to && s > to) break;
@@ -1757,14 +1762,20 @@ function gradeDates(from, to) {
   return out;
 }
 function gradeDue(from = new Date()) { return gradeDates(from, null)[0] || startOfDay(from); }
-const GRADE_EARLY = 3;   // "I did them" opens this many days before grade check-ins are due
+// "I did grade check-ins": marks the round that's coming up as done (any time), so the next due date moves on
 async function gradeDoneNow() {
-  const due = gradeDue(), left = dayDiff(startOfDay(new Date()), due);
-  if (left > GRADE_EARLY) return toast(`Grade check-ins aren't due until ${fmtDateShort(due)}. You can mark them done starting ${fmtDateShort(addDays(due, -GRADE_EARLY))}.`);
-  const prev = mset().gradeLast || '';
-  await api('PUT', 'mentor-settings', { gradeLast: ymd(new Date()) });
-  await reload(); toast(`Grade check-ins marked done. Next ones due ${fmtDateShort(gradeDue())}`, { undo: async () => { await api('PUT', 'mentor-settings', { gradeLast: prev }); reload(); } });
+  const due = gradeDue(), st = mset(), prev = { gradeLast: st.gradeLast || '', gradeDoneFor: st.gradeDoneFor || '' };
+  store.set('yes.gradePrev.' + LS_KEY, JSON.stringify(prev));
+  await api('PUT', 'mentor-settings', { gradeLast: ymd(new Date()), gradeDoneFor: ymd(due) });
+  await reload(); toast(`Grade check-ins completed ✓ Next ones due ${fmtDateShort(gradeDue())}`, { undo: async () => { await api('PUT', 'mentor-settings', prev); reload(); } });
 }
+async function gradeUndo() {
+  let prev = null; try { prev = JSON.parse(store.get('yes.gradePrev.' + LS_KEY) || 'null'); } catch { prev = null; }
+  await api('PUT', 'mentor-settings', prev || { gradeDoneFor: '' });
+  await reload(); toast('Grade check-ins marked not done.');
+}
+// marked done for a round that hasn't passed yet: show "Completed" until that round's Friday is over
+const gradeRecent = () => { const st = mset(); return st.gradeDoneFor && parseD(st.gradeDoneFor) >= startOfDay(new Date()) && st.gradeLast ? parseD(st.gradeLast) : null; };
 const gradeDone = (sid, due) => (M().grades || []).some(g => g.student_id === sid && g.period === ymd(due));
 async function toggleGrade(sid, due) {
   const was = gradeDone(sid, due);
@@ -1882,7 +1893,7 @@ function renderMentor() {
       <div class="m-stat">${hasGoal ? ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)') : ''}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span>` : ''}</div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : !hasGoal ? 'came in today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
       <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more ${st.countMode === 'reached' ? 'came in' : 'check-ins'}`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
       <div class="m-stat">${ring(doneAll.length, active.length, 'var(--green)')}<div><div class="lbl">Up to date</div><div class="big">${doneAll.length}<span class="muted" style="font-size:15px"> / ${active.length}</span></div><div class="muted sm">${active.length - doneAll.length} due this week</div></div></div>
-      <div class="m-stat ${isCur && gLeft <= 1 ? 'g-soon' : ''}"><div><div class="lbl">Grade check-ins due</div><div class="big">${DAYS[gDue.getDay()]} ${MONTHS_S[gDue.getMonth()]} ${gDue.getDate()}</div><div class="muted sm">${isCur ? (gLeft === 0 ? 'today' : gLeft === 1 ? 'tomorrow' : 'in ' + gLeft + ' days') : ''} · every ${+mset().gradeEvery || 14} days</div>${mset().gradeLast ? `<div class="muted sm">Last done ${fmtDateShort(parseD(mset().gradeLast))}</div>` : ''}${isCur && !IS_ADMIN ? (gLeft <= GRADE_EARLY ? '<button class="btn sm" id="gDoneBtn" style="margin-top:4px">I did them</button>' : `<button class="btn sm" disabled title="Opens ${GRADE_EARLY} days before they're due" style="margin-top:4px">I did them · opens ${fmtDateShort(addDays(gDue, -GRADE_EARLY))}</button>`) : ''}</div></div>
+      <div class="m-stat ${isCur && gLeft <= 1 ? 'g-soon' : ''}"><div><div class="lbl">Grade check-ins due</div><div class="big">${DAYS[gDue.getDay()]} ${MONTHS_S[gDue.getMonth()]} ${gDue.getDate()}</div><div class="muted sm">${isCur ? (gLeft === 0 ? 'today' : gLeft === 1 ? 'tomorrow' : 'in ' + gLeft + ' days') : ''} · every ${+mset().gradeEvery || 14} days</div>${mset().gradeLast ? `<div class="muted sm">Last done ${fmtDateShort(parseD(mset().gradeLast))}</div>` : ''}${isCur && !IS_ADMIN ? (gradeRecent() ? `<div class="g-ok">✓ Completed ${fmtDateShort(gradeRecent())} <button class="linkbtn sm" id="gUndoBtn" title="Mark them not done">Undo</button></div>` : '<button class="btn sm primary" id="gDoneBtn" style="margin-top:4px">✓ I did grade check-ins</button>') : ''}</div></div>
       ${!hasGoal ? '' : ''}<div class="m-stat" ${hasGoal ? '' : 'hidden'}><div><div class="lbl">Goal streak</div><div class="big">${streak()}<span class="muted" style="font-size:15px"> day${streak() === 1 ? '' : 's'}</span></div><div class="muted sm">days in a row hitting the daily goal</div></div></div>
     </div>
     <div class="m-week"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Check-ins per day</b><span class="muted sm">${hasGoal ? `goal: ${st.dailyGoal}/day` : ''}</span></div>
@@ -1913,6 +1924,7 @@ function renderMentor() {
     if (a === 'report') return openReport();
     if (a === 'ittools') return openIT();
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
+    if (e.target.id === 'gUndoBtn') return gradeUndo();
     if (a === 'roster') return openRoster();
     if (a === 'goals') return openGoals();
     if (a === 'csv') return exportWeekCSV(ws, we);
@@ -3821,7 +3833,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119140435';
+const BUILD_ID = '20261119141121';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
