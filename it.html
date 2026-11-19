@@ -2,6 +2,7 @@
 <html lang="en" data-theme="mocha">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -1644,7 +1645,8 @@ const callsIn = (a, b) => M().calls.filter(c => { const d = c.at.slice(0, 10); r
 const stuById = id => M().students.find(s => s.id === id);
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
 const avColor = n => COLORS[[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
-const csvCell = v => { v = String(v ?? ''); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+// cells starting with = + - @ would run as formulas when the file is opened in Excel/Sheets: make them plain text
+const csvCell = v => { v = String(v ?? ''); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
 const telHref = p => 'tel:' + String(p).replace(/[^\d+]/g, '');
 function relDay(dateStr) {
   const d = parseD(dateStr), diff = dayDiff(d, new Date());
@@ -1952,10 +1954,10 @@ async function quickLogNames(form, outcome) {
   for (const q of parts) {
     const r = findStudent(q);
     if (r.s) {
-      if (callsOn(new Date()).some(c => c.student_id === r.s.id && c.outcome === outcome)) { notes.push(`${r.s.name} is already logged today`); continue; }
+      if (callsOn(new Date()).some(c => c.student_id === r.s.id && c.outcome === outcome)) { notes.push(`${esc(r.s.name)} is already logged today`); continue; }
       made.push(await api('POST', 'calls', { student_id: r.s.id, at, method: 'in-person', contact: 'student', outcome, notes: '' }));
       done.push(r.s.name);
-    } else { left.push(q); if (r.many) notes.push(`"${q}" could be: ${r.many.map(x => `<button type="button" class="linkbtn qb-pick" data-n="${esc(x.name)}">${esc(x.name)}</button>`).join(', ')}`); else notes.push(`No student matches "${esc(q)}"`); }
+    } else { left.push(q); if (r.many) notes.push(`"${esc(q)}" could be: ${r.many.map(x => `<button type="button" class="linkbtn qb-pick" data-n="${esc(x.name)}">${esc(x.name)}</button>`).join(', ')}`); else notes.push(`No student matches "${esc(q)}"`); }
   }
   inp.value = left.join(', ');
   if (done.length) {
@@ -3704,7 +3706,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261118231427';
+const BUILD_ID = '20261119003357';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
@@ -3724,6 +3726,9 @@ async function checkForUpdate() {
 setTimeout(checkForUpdate, 20000);
 setInterval(checkForUpdate, 5 * 60000);
 addEventListener('focus', () => checkForUpdate());
+
+/* ---------- don't run inside someone else's page (stops click-jacking the sign-in) ---------- */
+if (window.top !== window.self) { try { window.top.location = window.self.location.href; } catch { document.documentElement.innerHTML = '<p style="font:16px sans-serif;padding:20px">Open the calendar in its own tab.</p>'; } }
 
 function applyData(d) {
   S.user = d.user; S.settings = d.settings; S.calendars = d.calendars; S.events = d.events; S.tasks = d.tasks; S.mentor = d.mentor;
