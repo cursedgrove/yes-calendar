@@ -3106,14 +3106,24 @@ const hexRgb = h => /^#[0-9a-f]{6}$/i.test(h || '') ? [1, 3, 5].map(i => parseIn
 function textOutcomeColor(h) {
   const c = hexRgb(h); if (!c) return null;
   const [r, g, b] = c;
-  if (g > r + 0.08 && g >= b) return [0.42, 0.66, 0.31];
-  if (r > g + 0.15 && r > b) return [0.88, 0.4, 0.4];
+  if (g > r + 0.05 && g >= b) return [0.42, 0.66, 0.31];
+  if (r > g + 0.1 && r > b) return [0.88, 0.4, 0.4];
   return null;
+}
+// a cell's fill from Google's palette: any green = came in, any red or pink = didn't (pale shades too); other colors as they are
+function fillOutcomeColor(h) {
+  const c = hexRgb(h); if (!c) return null;
+  const [r, g, b] = c, mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2, sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (sat < 0.2 || d < 0.08) return c;
+  let hue = mx === r ? 60 * (((g - b) / d) % 6) : mx === g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4); if (hue < 0) hue += 360;
+  if (hue >= 75 && hue <= 165) return l < 0.3 ? c : [0.42, 0.66, 0.31];   // very dark green stays a day label (Minimum Day...)
+  if (hue <= 12 || hue >= 330) return [0.88, 0.4, 0.4];
+  return c;
 }
 function liveSheet(tab) {
   const cells = new Map();
   for (const [row, col, fill, text, parts] of tab.cells || []) {
-    const cell = { row, col, text: String(text).replace(/\r/g, ''), color: hexRgb(fill) };
+    const cell = { row, col, text: String(text).replace(/\r/g, ''), color: fillOutcomeColor(fill) };
     if (parts) {
       // names written in different colors in one cell, even on the same line: each colored piece is its own line
       const segs = [];   // [text, color]
@@ -3305,7 +3315,7 @@ async function mentorSync(c) {
  * The normal sync then shares them with the mentor's other devices and the admin. */
 const LIVE_EVERY = 4 * 60000, LIVE_ON = true;
 async function plannerLiveSync(c, force = false, dry = false) {
-  if (!force && Date.now() - (SY.liveAt || 0) < LIVE_EVERY) return false;
+  if (!force && Date.now() - (SY.liveAt || 0) < (SY.liveWatching ? 4 * LIVE_EVERY : LIVE_EVERY)) return false;
   if (!dry) SY.liveAt = Date.now();
   const plan = { newStudents: [], add: [], change: [], remove: [] };
   let j;
@@ -3403,6 +3413,20 @@ async function syncNow(quiet = true) {
     if (!quiet) toast(e.message, { duration: 8000 });
   } finally { SY.busy = false; }
 }
+// every 20 seconds: ask (cheaply) whether this mentor's planner tab changed; if it did, read it now and share the result
+async function plannerWatch() {
+  if (!LIVE_ON || !syncOn() || SY.busy || document.hidden) return;
+  const c = syncCfg(); if (c.role === 'boss') return;
+  let j; try { j = await syncCall({ action: 'planner-stamp', name: c.name }, c); } catch { return; }
+  if (!j || !j.ok) return;
+  SY.liveWatching = !!j.watching;
+  if (SY.liveStamp === undefined) { SY.liveStamp = j.stamp; return; }   // first look: the regular sync reads it anyway
+  if (j.stamp === SY.liveStamp) return;
+  SY.liveStamp = j.stamp;
+  if (SY.busy) return;
+  SY.busy = true;
+  try { if (await plannerLiveSync(c, true)) { await mentorSync(c); toast('Updated from the planner Sheet'); } } catch (e) { console.warn('planner sheet', e.message); } finally { SY.busy = false; }
+}
 function syncSoon() { if (!syncOn() || syncCfg().role === 'boss') return; clearTimeout(SY.timer); SY.timer = setTimeout(() => syncNow(), 4000); }
 function syncInit() {
   const raw = api;
@@ -3413,6 +3437,7 @@ function syncInit() {
   };
   setTimeout(() => syncNow(), 1500);
   setInterval(() => { if (!document.hidden) syncNow(); }, 60000);                   // boss: every minute; mentor: a safety resend
+  setInterval(() => { plannerWatch(); }, 20000);
   addEventListener('focus', () => syncNow());
   addEventListener('online', () => syncNow());
   addEventListener('beforeunload', () => {
@@ -3960,7 +3985,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119145600';
+const BUILD_ID = '20261119151434';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
