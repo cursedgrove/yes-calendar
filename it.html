@@ -780,7 +780,7 @@ function fixMentor(m) {
   const d = MENTOR_DEF();
   if (!m || typeof m !== 'object') return d;
   return { students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
-    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}) }) };
+    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix2: !!(m.settings && m.settings.goalFix2) }) };
 }
 
 /* Modesto City Schools 2026-2027 academic calendar (dates for 9-12 / all grades). Starred = red "important" dates. */
