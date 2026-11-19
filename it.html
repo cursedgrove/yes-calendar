@@ -484,6 +484,30 @@ td.cv-closed,.cv-key i.cv-closed,.cv-tbl thead th.cv-closed{background:repeating
 .ms-acts button[data-mswap]{width:auto;padding:0 8px;font-size:12px}
 .due-card{gap:3px!important;font-size:14px;line-height:1.45}
 
+/* seasonal decorations + theme picker */
+#decor{position:fixed;inset:0;pointer-events:none;z-index:40}
+.tp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tp-item{display:flex;align-items:center;gap:10px;border:1px solid var(--s1);background:var(--base);color:var(--text);border-radius:10px;padding:8px 10px;font:inherit;cursor:pointer;text-align:left}
+.tp-item:hover{border-color:var(--accent)}
+.tp-item.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
+.tp-sw{width:34px;height:24px;border-radius:6px;flex:none;border:1px solid rgba(0,0,0,.15);background:linear-gradient(var(--a) 0 35%,var(--b) 35% 100%);position:relative}
+.tp-sw::after{content:"";position:absolute;right:4px;bottom:4px;width:9px;height:9px;border-radius:50%;background:var(--c)}
+.tp-mix{background:conic-gradient(#c0392b 0 25%,#ff8a1f 0 50%,#d64f7a 0 75%,#0e7ea8 0)}
+.tp-mix::after{display:none}
+.tp-decor button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+/* a little seasonal trim under the top bar */
+html[data-season] .topbar{position:relative}
+html[data-season="christmas"] .topbar{box-shadow:inset 0 -4px 0 0 transparent;border-bottom:4px solid transparent;border-image:repeating-linear-gradient(45deg,#c0392b 0 10px,#ffffff 10px 20px,#1f7a3a 20px 30px,#ffffff 30px 40px) 4}
+html[data-season="halloween"] .topbar{border-bottom:4px solid transparent;border-image:repeating-linear-gradient(45deg,#ff8a1f 0 10px,#16111b 10px 20px) 4}
+html[data-season="spring"] .topbar{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,#f7b2c8,#fde68a,#a7e3b5,#b9d4f5,#d9b8f0) 4}
+html[data-season="summer"] .topbar{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,#ffd166,#ff9f1c,#0e7ea8,#4fb3d9) 4}
+/* seasonal themes: top bar buttons like Classic (light text on the colored bar) */
+html[data-season]:not([data-season=""]) .topbar .btn,html[data-season]:not([data-season=""]) .topbar .seg button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);color:var(--topbar-text)}
+html[data-season]:not([data-season=""]) .topbar .btn:hover,html[data-season]:not([data-season=""]) .topbar .seg button:hover{background:rgba(255,255,255,.22)}
+html[data-season]:not([data-season=""]) .topbar .seg button.on{background:#fff;color:var(--topbar);border-color:#fff;font-weight:bold}
+html[data-season]:not([data-season=""]) .search input{background:#fff;color:#222;border:1px solid #fff}
+html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text)}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -645,7 +669,7 @@ html,body{font-size:13px}
       <button data-view="mentor" title="Mentoring tracker (O)">Mentoring</button>
     </div>
     <button class="btn" id="insightsBtn" title="Time insights (I)">Stats</button>
-    <button class="btn" id="themeBtn" title="Toggle light/dark">Theme</button>
+    <button class="btn" id="themeBtn" title="Themes: seasonal looks, light and dark">Theme</button>
     <button class="btn" id="settingsBtn" title="Settings">Settings</button>
   </header>
 
@@ -784,7 +808,7 @@ const LS_KEY = 'orbit.it.v2';
 const DEFAULT_SETTINGS = {
   theme: 'classic', weekStart: 0, defaultDuration: 60, timeFormat: '12', showWeekends: true, weekNumbers: false,
   workStart: 9, workEnd: 17, dayStartHour: 7, holidays: true, defaultReminder: 10, declutter: false,
-  colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciNext: '#cdd6f4', ciGrade: '#f9e2af', showCheckins: true,
+  colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciNext: '#cdd6f4', ciGrade: '#f9e2af', showCheckins: true, decor: 'animated',
 };
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, TIME_RE = /^\d{2}:\d{2}$/, COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 let STORAGE_OK = true;
@@ -1344,16 +1368,32 @@ const THEMES = {
   solarized: { name: 'Solarized (light)', mode: 'latte', v: { base: '#fdf6e3', mantle: '#eee8d5', crust: '#e4ddc8', s0: '#e0dac6', s1: '#d3cbb4', s2: '#c5bda5', o0: '#93a1a1', o1: '#839496', text: '#586e75', sub: '#657b83', sub1: '#586e75', blue: '#268bd2', red: '#dc322f', green: '#859900', peach: '#cb4b16', yellow: '#b58900', mauve: '#6c71c4', 'on-accent': '#ffffff' } },
   plain: { name: 'Plain (white)', mode: 'latte', v: { base: '#ffffff', mantle: '#f3f3f3', crust: '#e6e6e6', s0: '#e4e4e4', s1: '#cccccc', s2: '#b3b3b3', o0: '#999999', o1: '#888888', text: '#222222', sub: '#555555', sub1: '#333333', blue: '#2266cc', red: '#cc2222', green: '#228833', peach: '#dd6600', yellow: '#bb8800', mauve: '#7744aa', 'on-accent': '#ffffff' } },
   auto: { name: 'Auto (match computer)', mode: 'auto' },
+  christmas: { name: 'Christmas', season: true, mode: 'latte', v: { base: '#fffdf8', mantle: '#f6f1e7', crust: '#ebe3d2', s0: '#ece4d4', s1: '#d6cbb5', s2: '#bfb29a', o0: '#9a8f7b', o1: '#857a66', text: '#2b2118', sub: '#5c5044', sub1: '#3d3228', blue: '#1f6f43', red: '#c0392b', green: '#1f7a3a', peach: '#d9822b', yellow: '#c9a227', mauve: '#8e3b46', accent: '#c0392b', 'on-accent': '#ffffff', topbar: '#1d4a2c', 'topbar-text': '#ffffff', 'today-bg': '#fde8e4' } },
+  halloween: { name: 'Halloween', season: true, mode: 'mocha', v: { base: '#1c1622', mantle: '#16111b', crust: '#100c14', s0: '#2c2333', s1: '#3b2f44', s2: '#4c3d57', o0: '#6d5a7a', o1: '#857094', text: '#f3e9dc', sub: '#c9b8a6', sub1: '#e2d4c3', blue: '#ff8a1f', red: '#ff5a4d', green: '#9ccc4a', peach: '#ff8a1f', yellow: '#ffc94a', mauve: '#b07ae6', accent: '#ff8a1f', 'on-accent': '#1c1622', topbar: '#2a1832', 'topbar-text': '#ffd9b0', 'today-bg': '#3a2416' } },
+  spring: { name: 'Spring', season: true, mode: 'latte', v: { base: '#fbfff9', mantle: '#f1f8ee', crust: '#e3efdf', s0: '#e5efe1', s1: '#cddfc7', s2: '#b5ceae', o0: '#8fa889', o1: '#7a9374', text: '#24301f', sub: '#55654f', sub1: '#36432f', blue: '#4f9d69', red: '#d64f7a', green: '#4f9d69', peach: '#ee8a5c', yellow: '#c9a227', mauve: '#b06ab3', accent: '#d64f7a', 'on-accent': '#ffffff', topbar: '#5a9e6f', 'topbar-text': '#ffffff', 'today-bg': '#fde6ef' } },
+  summer: { name: 'Summer', season: true, mode: 'latte', v: { base: '#fffdf6', mantle: '#fdf5e2', crust: '#f6e9c9', s0: '#f3e8cd', s1: '#e3d3ac', s2: '#cdb98b', o0: '#a8946a', o1: '#937f57', text: '#1f2a33', sub: '#4d5a63', sub1: '#2f3b44', blue: '#0f86b3', red: '#e0533d', green: '#2f9e5b', peach: '#ff9f1c', yellow: '#e6a700', mauve: '#7a5cc7', accent: '#0f86b3', 'on-accent': '#ffffff', topbar: '#0e7ea8', 'topbar-text': '#ffffff', 'today-bg': '#fff1c9' } },
+  seasonal: { name: 'Seasonal (changes with the time of year)', mode: 'season' },
 };
+// which seasonal theme fits a date: Halloween in October, Christmas in December (through Jan 6), spring Mar-May, summer Jun-Aug
+function seasonFor(d = new Date()) {
+  const m = d.getMonth() + 1, day = d.getDate();
+  if (m === 12 || (m === 1 && day <= 6)) return 'christmas';
+  if (m === 10 || (m === 11 && day === 1)) return 'halloween';
+  if (m >= 3 && m <= 5) return 'spring';
+  if (m >= 6 && m <= 8) return 'summer';
+  return '';
+}
+const themeKey = () => S.settings.theme === 'seasonal' ? (seasonFor() || 'classic') : (THEMES[S.settings.theme] ? S.settings.theme : 'mocha');
 const THEME_VARS = ['topbar', 'topbar-text', 'today-bg', 'base', 'mantle', 'crust', 's0', 's1', 's2', 'o0', 'o1', 'text', 'sub', 'sub1', 'blue', 'red', 'green', 'peach', 'yellow', 'mauve', 'on-accent', 'accent'];
 const CUSTOM_COLORS = [['accent', 'Accent'], ['topbar', 'Top bar'], ['base', 'Background'], ['mantle', 'Sidebar'], ['s0', 'Buttons'], ['text', 'Text']];
 
 function applyTheme() {
-  const t = THEMES[S.settings.theme] || THEMES.mocha, root = document.documentElement;
+  const key = themeKey(), t = THEMES[key] || THEMES.mocha, root = document.documentElement;
   let mode = t.mode;
   if (mode === 'auto') mode = matchMedia('(prefers-color-scheme: light)').matches ? 'latte' : 'mocha';
   root.dataset.theme = mode;
-  root.dataset.skin = THEMES[S.settings.theme] ? S.settings.theme : 'mocha';
+  root.dataset.skin = key;
+  root.dataset.season = t.season ? key : '';
   for (const k of THEME_VARS) root.style.removeProperty('--' + k);
   for (const [k, v] of Object.entries(t.v || {})) root.style.setProperty('--' + k, v);
   const c = S.settings.colors || {};
@@ -1361,6 +1401,77 @@ function applyTheme() {
   if (c.blue && !c.accent) root.style.setProperty('--accent', c.blue);
   const meta = $('meta[name=theme-color]');
   if (meta) meta.content = cssColorHex('--mantle');
+  startDecor(t.season ? key : '', S.settings.decor || 'animated');
+}
+
+/* ---------- seasonal decorations: falling snow, leaves and bats, petals, summer bubbles (animated or still) ---------- */
+const DECOR = { run: 0, raf: 0, kind: '', mode: '' };
+function startDecor(kind, mode) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches && mode === 'animated') mode = 'still';
+  if (DECOR.kind === kind && DECOR.mode === mode && (kind ? $('#decor') : true)) return;
+  DECOR.kind = kind; DECOR.mode = mode; DECOR.run++; cancelAnimationFrame(DECOR.raf);
+  let cv = $('#decor');
+  if (!kind || mode === 'off') { cv?.remove(); return; }
+  if (!cv) { cv = document.createElement('canvas'); cv.id = 'decor'; cv.setAttribute('aria-hidden', 'true'); document.body.appendChild(cv); }
+  const ctx = cv.getContext('2d'), run = DECOR.run, dpr = Math.min(2, devicePixelRatio || 1);
+  const size = () => { cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; cv.style.width = innerWidth + 'px'; cv.style.height = innerHeight + 'px'; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
+  size(); addEventListener('resize', () => { if (run === DECOR.run) { size(); if (mode === 'still') draw(0); } });
+  const W = () => innerWidth, H = () => innerHeight, R = (a, b) => a + Math.random() * (b - a);
+  const kinds = {
+    christmas: { n: 55, make: () => ({ t: Math.random() < 0.18 ? '❄' : 'dot', r: R(1.5, 3.6), vy: R(0.35, 1.1), vx: R(-0.3, 0.3), sway: R(0.4, 1.4), a: R(0.45, 0.9), s: R(12, 20) }) },
+    halloween: { n: 16, make: () => ({ t: Math.random() < 0.35 ? '🦇' : Math.random() < 0.5 ? '🍂' : '🎃', vy: R(0.25, 0.7), vx: R(-0.6, 0.6), sway: R(0.6, 1.8), a: R(0.35, 0.7), s: R(14, 22), rot: R(0, 6), vr: R(-0.02, 0.02) }) },
+    spring: { n: 22, make: () => ({ t: Math.random() < 0.8 ? '🌸' : '🦋', vy: R(0.3, 0.8), vx: R(0.1, 0.6), sway: R(0.6, 1.6), a: R(0.4, 0.75), s: R(12, 18), rot: R(0, 6), vr: R(-0.02, 0.02) }) },
+    summer: { n: 24, make: () => ({ t: Math.random() < 0.12 ? '☀️' : 'bubble', r: R(3, 9), vy: -R(0.25, 0.7), vx: R(-0.2, 0.2), sway: R(0.4, 1.2), a: R(0.25, 0.5), s: R(14, 20) }) },
+  };
+  const K = kinds[kind]; if (!K) return;
+  const ps = Array.from({ length: Math.round(K.n * Math.min(1.5, W() / 1300)) }, () => ({ ...K.make(), x: R(0, W()), y: R(0, H()), ph: R(0, 6.28) }));
+  const one = (p, t) => {
+    ctx.globalAlpha = p.a;
+    if (p.t === 'dot') { ctx.fillStyle = kind === 'christmas' && document.documentElement.dataset.theme === 'latte' ? '#b9d4ea' : '#ffffff'; ctx.beginPath(); ctx.arc(p.x + Math.sin(t / 900 + p.ph) * 6 * p.sway, p.y, p.r, 0, 6.28); ctx.fill(); return; }
+    if (p.t === 'bubble') { ctx.strokeStyle = '#4fb3d9'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(p.x + Math.sin(t / 1100 + p.ph) * 5 * p.sway, p.y, p.r, 0, 6.28); ctx.stroke(); return; }
+    ctx.save(); ctx.translate(p.x + Math.sin(t / 1000 + p.ph) * 8 * p.sway, p.y); if (p.rot != null) ctx.rotate(p.rot); ctx.font = `${p.s}px system-ui, "Segoe UI Emoji", "Apple Color Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(p.t, 0, 0); ctx.restore();
+  };
+  function draw(t) {
+    ctx.clearRect(0, 0, W(), H());
+    for (const p of ps) one(p, t);
+    ctx.globalAlpha = 1;
+  }
+  if (mode === 'still') { draw(0); return; }
+  let last = performance.now();
+  const tick = now => {
+    if (run !== DECOR.run) return;
+    const dt = Math.min(3, (now - last) / 16.7); last = now;
+    if (!document.hidden) {
+      for (const p of ps) {
+        p.y += p.vy * dt; p.x += p.vx * dt; if (p.rot != null) p.rot += p.vr * dt;
+        if (p.vy > 0 && p.y > H() + 20) { p.y = -20; p.x = R(0, W()); }
+        if (p.vy < 0 && p.y < -20) { p.y = H() + 20; p.x = R(0, W()); }
+        if (p.x > W() + 30) p.x = -30; if (p.x < -30) p.x = W() + 30;
+      }
+      draw(now);
+    }
+    DECOR.raf = requestAnimationFrame(tick);
+  };
+  DECOR.raf = requestAnimationFrame(tick);
+}
+
+/* ---------- the Theme button: pick a look, and whether seasonal decorations move ---------- */
+function openThemePicker() {
+  const cur = S.settings.theme, list = ['classic', 'mocha', 'latte', 'seasonal', 'christmas', 'halloween', 'spring', 'summer'];
+  const sw = k => { const v = (THEMES[k] && THEMES[k].v) || (k === 'mocha' ? { topbar: '#181825', base: '#1e1e2e', accent: '#89b4fa' } : k === 'latte' ? { topbar: '#e6e9ef', base: '#eff1f5', accent: '#1e66f5' } : { topbar: '#888', base: '#ddd', accent: '#555' });
+    return `<span class="tp-sw" style="--a:${v.topbar || v.mantle};--b:${v.base};--c:${v.accent || v.blue}"></span>`; };
+  const label = k => k === 'seasonal' ? `Seasonal <span class="muted sm">(now: ${THEMES[seasonFor() || 'classic'].name})</span>` : esc(THEMES[k].name.replace(/ \(.*\)$/, ''));
+  openModal(`<div class="m-head"><h2>Theme</h2><button class="iconbtn" data-x>✕</button></div>
+  <div class="m-body">
+    <div class="tp-grid">${list.map(k => `<button type="button" class="tp-item ${cur === k ? 'on' : ''}" data-tp="${k}">${k === 'seasonal' ? '<span class="tp-sw tp-mix"></span>' : sw(k)}<span>${label(k)}</span></button>`).join('')}</div>
+    <div class="field"><span>Seasonal decorations (snow, leaves, petals...)</span>
+      <div class="seg tp-decor">${[['animated', 'Animated'], ['still', 'Still'], ['off', 'Off']].map(([v, l]) => `<button type="button" data-dec="${v}" class="${(S.settings.decor || 'animated') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <div class="muted sm">More themes and your own colors are in Settings.</div>
+  </div>
+  <div class="m-foot"><button class="btn primary" data-x>Done</button></div>`, 'sm');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  $('#modal .tp-grid').onclick = async e => { const b = e.target.closest('[data-tp]'); if (!b) return; await saveSettings({ theme: b.dataset.tp }); $$('#modal [data-tp]').forEach(x => x.classList.toggle('on', x === b)); };
+  $('#modal .tp-decor').onclick = async e => { const b = e.target.closest('[data-dec]'); if (!b) return; await saveSettings({ decor: b.dataset.dec }); $$('#modal [data-dec]').forEach(x => x.classList.toggle('on', x === b)); };
 }
 function cssColorHex(v) {
   const el = document.createElement('div');
@@ -4671,7 +4782,7 @@ function bindOnce() {
   $('#nextBtn').onclick = () => shift(1);
   $('#viewSeg').onclick = e => { const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view); };
   $('#createBtn').onclick = () => { closeSidebar(); openEditor(); };
-  $('#themeBtn').onclick = () => saveSettings({ theme: document.documentElement.dataset.theme === 'mocha' ? 'latte' : 'mocha' });
+  $('#themeBtn').onclick = () => openThemePicker();
   $('#settingsBtn').onclick = () => openSettings();
   $('#insightsBtn').onclick = () => showInsights();
   $('#kbdLink').onclick = e => { e.preventDefault(); showShortcuts(); };
