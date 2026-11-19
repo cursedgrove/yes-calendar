@@ -826,11 +826,39 @@ function gradeFix(st) {
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
   return st;
 }
+const nameKey = n => String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z' ]/g, '').replace(/\s+/g, ' ').trim();
+// the same student loaded twice (e.g. the planner and the sync both loaded them): fold the copies into one
+function dedupeMentor(m) {
+  const keep = new Map(), alias = new Map();
+  for (const s of m.students.slice().sort((a, b) => a.id - b.id)) {
+    if (s.src) continue;
+    const k = nameKey(s.name) + '|' + nameKey(s.mentor);
+    const k0 = keep.get(k);
+    if (!k0) { keep.set(k, s); continue; }
+    for (const f of Object.keys(s)) if ((k0[f] === '' || k0[f] == null) && s[f] !== '' && s[f] != null) k0[f] = s[f];
+    if ((s.nextSet || '') > (k0.nextSet || '')) { k0.nextAt = s.nextAt; k0.nextSet = s.nextSet; }
+    if ((s.absentOn || '') > (k0.absentOn || '')) k0.absentOn = s.absentOn;
+    if (s.active !== false) k0.active = true;
+    alias.set(s.id, k0.id);
+  }
+  if (!alias.size && m.calls.length === new Set(m.calls.map(c => c.student_id + '|' + c.at)).size) return m;
+  m.students = m.students.filter(s => !alias.has(s.id));
+  const seen = new Map();
+  for (const c of m.calls.slice().sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')) || b.id - a.id)) {
+    if (alias.has(c.student_id)) c.student_id = alias.get(c.student_id);
+    const k = c.student_id + '|' + c.at;
+    if (!seen.has(k)) seen.set(k, c);
+  }
+  const ok = new Set([...seen.values()].map(c => c.id));
+  m.calls = m.calls.filter(c => ok.has(c.id));
+  m.grades.forEach(g => { if (alias.has(g.student_id)) g.student_id = alias.get(g.student_id); });
+  return m;
+}
 function fixMentor(m) {
   const d = MENTOR_DEF();
   if (!m || typeof m !== 'object') return d;
-  return { students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
-    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3) }) };
+  return dedupeMentor({ students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
+    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3) }) });
 }
 
 /* Modesto City Schools 2026-2027 academic calendar (dates for 9-12 / all grades). Starred = red "important" dates. */
@@ -1039,7 +1067,11 @@ async function api(method, path, body = {}) {
     const M = DB.mentor;
     if (res === 'students-import') {
       let n = 0;
-      for (const row of (body.rows || []).slice(0, 2000)) { try { M.students.push({ id: nid(), ...cleanStudent(row), created: nowStamp() }); n++; } catch { /* skip */ } }
+      // a student already on this calendar (same name, same mentor) isn't added again
+      const have = new Set(M.students.filter(x => !x.src).map(x => nameKey(x.name) + '|' + nameKey(x.mentor)));
+      for (const row of (body.rows || []).slice(0, 2000)) {
+        try { const st = cleanStudent(row), k = nameKey(st.name) + '|' + nameKey(st.mentor); if (!row.src && have.has(k)) continue; M.students.push({ id: nid(), ...st, created: nowStamp() }); have.add(k); n++; } catch { /* skip */ }
+      }
       saveDB(); return { imported: n };
     }
     if (method === 'POST' && !id) { const st = { id: nid(), ...cleanStudent(body), created: nowStamp() }; M.students.push(st); saveDB(); return out(st); }
@@ -3585,6 +3617,7 @@ async function offerPlanner() {
   let P = null;
   try { P = (await syncCall({ action: 'planner-get' })).planner; } catch { return; }
   if (!P || !(P.roster || []).length) return;
+  if (Mall().students.some(s => !s.src)) { store.set(askedKey, L.name); return; }   // the sync already brought their students back
   if (!$('#modalWrap').hidden) return;   // don't cover something they're doing; we'll ask next time
   store.set(askedKey, L.name);
   const came = P.checkins.filter(c => c.outcome === 'reached').length;
@@ -3596,6 +3629,7 @@ async function offerPlanner() {
   $('#kp_go').onclick = async () => {
     $('#kp_go').disabled = true;
     if (P.help) setHelp(P.help);
+    if (Mall().students.some(s => !s.src)) { closeModal(); toast('Your students are already loaded.'); return; }
     const r1 = await api('POST', 'students-import', { rows: P.roster.map(s => ({ ...s, mentor: P.owner || L.name })) });
     const names = new Set(P.roster.map(s => s.name.toLowerCase()));
     const rows = P.checkins.filter(c => P.keepUnknown || names.has(c.name.toLowerCase())).map(c => ({ name: c.name, at: `${c.date}T${c.time}`, outcome: c.outcome }));
@@ -3774,7 +3808,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119110544';
+const BUILD_ID = '20261119133412';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
