@@ -2767,6 +2767,7 @@ async function syncNow(quiet = true) {
         const theirs = s => s.mentor && s.mentor.toLowerCase() !== m.name.toLowerCase() && own.has(s.mentor.toLowerCase()) && (byName.get(s.mentor.toLowerCase())?.students || []).some(x => x.name === s.name);
         const skip = new Map(m.students.filter(theirs).map(s => [s.name, s.mentor.toLowerCase()]));
         for (const c of m.calls || []) if (skip.has(c.student)) moved.push([skip.get(c.student), c]);
+        if (skip.size && skip.size === m.students.length) m.handedOver = true;
         m.students = m.students.filter(s => !skip.has(s.name)); m.calls = (m.calls || []).filter(c => !skip.has(c.student));
       }
       for (const [owner, c] of moved) {   // e.g. Abel pulled out one of Daisy's students: it counts on Daisy's list
@@ -2774,6 +2775,11 @@ async function syncNow(quiet = true) {
         if (!o.calls.some(x => x.student === c.student && x.date === c.date && x.time === c.time)) o.calls.push(c);
       }
       for (const m of j.mentors || []) {
+        if (m.handedOver && !m.students.length) {   // everything they synced belongs on someone else's list (Abel helping Daisy, now Daisy syncs too)
+          names.add(m.name);
+          if (Mall().students.some(x => x.src === m.name)) { await api('POST', 'team-clear', { from: m.name }); SY.seen.delete(m.name); changed = true; }
+          continue;
+        }
         if ((window.YES_ADMIN?.test || window.YES_ADMIN?.baseline) && !m.students.length) continue;   // keep the planner data until they have real students
         names.add(m.name);
         const sig = JSON.stringify([m.students, m.calls]);
