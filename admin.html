@@ -463,6 +463,26 @@ td.cv-closed,.cv-key i.cv-closed,.cv-tbl thead th.cv-closed{background:repeating
 .cv-key{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);flex-wrap:wrap}
 .cv-key i{display:inline-block;width:14px;height:14px;border:1px solid var(--s1);border-radius:3px;margin-left:6px;vertical-align:-2px}
 
+/* quick log */
+.qbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--mantle);border:1px solid var(--s0);border-radius:14px;padding:10px 12px}
+.qbar .qbar-t{font-size:13px;margin-right:4px}
+.qbar .qb-name{flex:1;min-width:200px}
+.qbar .qb-when{width:auto}
+.qbar .qb-msg{flex-basis:100%}
+.qbar .qb-msg:empty{display:none}
+.qbar-sm{margin-top:8px;padding:8px;gap:6px;background:var(--base);border-radius:10px}
+.qbar-sm .qb-name{min-width:0;flex-basis:100%}
+.qbar-sm .qb-when{flex:1}
+.qbar-sm .btn{padding:4px 8px}
+
+/* someone else came instead */
+.sw-list{display:flex;flex-direction:column;gap:4px;max-height:280px;overflow:auto;border:1px solid var(--s0);border-radius:10px;padding:6px}
+.sw-h{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub);font-weight:600;padding:6px 4px 2px}
+.sw-pick{display:flex;justify-content:space-between;gap:10px;align-items:center;text-align:left;border:1px solid var(--s1);background:var(--base);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;cursor:pointer}
+.sw-pick:hover{border-color:var(--accent)}
+.sw-pick.on{border-color:var(--green);background:color-mix(in srgb,var(--green) 18%,var(--base))}
+.ms-acts button[data-mswap]{width:auto;padding:0 8px;font-size:12px}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -764,7 +784,7 @@ const LS_KEY = 'orbit.admin.v3';
 const DEFAULT_SETTINGS = {
   theme: 'classic', weekStart: 0, defaultDuration: 60, timeFormat: '12', showWeekends: true, weekNumbers: false,
   workStart: 9, workEnd: 17, dayStartHour: 7, holidays: true, defaultReminder: 10, declutter: false,
-  colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciGrade: '#f9e2af', showCheckins: true,
+  colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciNext: '#cdd6f4', ciGrade: '#f9e2af', showCheckins: true,
 };
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, TIME_RE = /^\d{2}:\d{2}$/, COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 let STORAGE_OK = true;
@@ -1114,6 +1134,9 @@ function cleanStudent(b, base) {
   t.every = +t.every > 0 ? Math.min(90, Math.round(+t.every)) : '';
   t.active = t.active !== false; t.flagged = !!t.flagged;
   if (b && b.src) t.src = String(b.src).slice(0, 80);
+  // a date picked by hand for their next pull-out (after they missed one); cleared once they come in again
+  if (b && 'nextAt' in b) t.nextAt = /^\d{4}-\d{2}-\d{2}$/.test(b.nextAt || '') ? b.nextAt : '';
+  if (b && 'nextSet' in b) t.nextSet = String(b.nextSet || '').slice(0, 16);
   return t;
 }
 function cleanCall(b, base) {
@@ -1347,7 +1370,7 @@ function cssColorHex(v) {
   return '#' + m.slice(0, 3).map(x => (+x).toString(16).padStart(2, '0')).join('');
 }
 function colorRowsHTML() {
-  const ci = [['ciCame', 'Came in', S.settings.ciCame || '#a6e3a1'], ['ciNo', "Didn't come in", S.settings.ciNo || '#fab387'], ['ciDue', 'Call-in dates', S.settings.ciDue || '#89b4fa'], ['ciGrade', 'Grade check-ins', S.settings.ciGrade || '#f9e2af']];
+  const ci = [['ciCame', 'Came in', S.settings.ciCame || '#a6e3a1'], ['ciNo', "Didn't come in", S.settings.ciNo || '#fab387'], ['ciNext', 'Next pull-outs', S.settings.ciNext || '#cdd6f4'], ['ciGrade', 'Grade check-ins', S.settings.ciGrade || '#f9e2af']];
   return CUSTOM_COLORS.map(([k, label]) => `<div class="set-row"><span>${label}</span><input type="color" data-col="${k}" value="${cssColorHex('--' + k)}"></div>`).join('') +
     ci.map(([k, label, v]) => `<div class="set-row"><span>${label}</span><input type="color" data-cic="${k}" value="${v}"></div>`).join('') +
     `<div class="row"><button class="linkbtn sm" id="c_reset">reset colors</button></div>`;
@@ -1360,7 +1383,7 @@ function bindColorRows() {
   $$('#modal [data-cic]').forEach(el => { el.onchange = () => saveSettings({ [el.dataset.cic]: el.value }); });
   const sel = $('#modal [data-s="theme"]');
   if (sel) sel.addEventListener('change', () => setTimeout(() => { if (!$('#modalWrap').hidden) openSettings(); }, 50));
-  $('#c_reset').onclick = async () => { await saveSettings({ colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciGrade: '#f9e2af' }); openSettings(); };
+  $('#c_reset').onclick = async () => { await saveSettings({ colors: {}, ciCame: '#a6e3a1', ciNo: '#fab387', ciDue: '#89b4fa', ciNext: '#cdd6f4', ciGrade: '#f9e2af' }); openSettings(); };
 }
 
 /* ======================================================================== check-ins on the calendar */
@@ -1390,15 +1413,15 @@ function checkinOccs(rs, re) {
     };
     out.push({ ev, start: d, end: addMin(d, 15), allDay: false, date: ymd(d), key: ev.id });
   }
+  // who's scheduled next: 2 weeks after they came in (or the day picked when they missed). Only upcoming days:
+  // today's and overdue students are on the Mentoring tab, not piled onto today.
   const today = startOfDay(new Date());
   for (const s of M().students) {
     if (s.active === false) continue;
-    const due = nextDue(s); if (!due) continue;
-    const over = due < today, d = over ? today : due;
-    if (d < rs || d >= end) continue;
+    const d = nextDue(s); if (!d || d <= today || d < rs || d >= end) continue;
     const ev = {
-      id: 'due-' + s.id, dueFor: s.id, checkin: true, title: `Call in: ${s.name}${over ? ' (overdue)' : ''}`,
-      all_day: true, calendar_id: null, start: ymd(d), end: ymd(d), color: S.settings.ciDue || '#89b4fa',
+      id: 'due-' + s.id, dueFor: s.id, checkin: true, title: `Next: ${s.name}${s.nextAt && s.nextAt === ymd(d) ? ' (rescheduled)' : ''}`,
+      all_day: true, calendar_id: null, start: ymd(d), end: ymd(d), color: S.settings.ciNext || '#cdd6f4',
       rrule: null, exdates: [], reminders: [], checklist: [], location: '', description: '', status: 'free', starred: false,
     };
     out.push({ ev, start: d, end: addDays(d, 1), allDay: true, date: ymd(d), key: ev.id });
@@ -1520,8 +1543,14 @@ function goalsFor(ws) {
 }
 function nextDue(s) {
   const lc = lastCall(s.id, c => c.outcome === 'reached');
+  // rescheduled by hand (they missed and someone else came instead): that date, until they come in again
+  if (s.nextAt && (!lc || lc.at < (s.nextSet || s.nextAt))) {
+    let d = parseD(s.nextAt);
+    for (let i = 0; i < 60 && !openDay(d); i++) d = addDays(d, 1);
+    return d;
+  }
   if (!lc) return null;
-  let d = addDays(startOfDay(parseD(lc.at)), +s.every || +mset().everyDays || 14);
+  let d = addDays(startOfDay(parseD(lc.at)), +s.every || +mset().everyDays || 14);   // 2 weeks after they came in
   for (let i = 0; i < 60 && !openDay(d); i++) d = addDays(d, 1); // skip weekends and closed days
   return d;
 }
@@ -1659,6 +1688,7 @@ function renderMentor() {
       <button class="btn" data-mact="goals">Goals</button>
       <button class="btn" data-mact="csv" title="Download this week's check-ins as a spreadsheet">Export week</button>
     </div>
+    ${!IS_ADMIN && M().students.length && isCur ? quickBar('main') : ''}
     ${!M().students.length && IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
     ${!M().students.length && !IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
     ${weekClosures.map(c => `<div class="m-closed"><b>IYT room closed</b> ${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}. No pull-outs those days; anyone due then moves to the next open day.</div>`).join('')}
@@ -1678,7 +1708,7 @@ function renderMentor() {
       <div class="m-list"><h3><span>${st.openDays === 0 ? 'Still due (room closed this week)' : 'Due this week'} <span class="muted">(${need.length})</span></span></h3>${need.map(needRow).join('') || `<div class="m-empty">${active.length ? (q ? 'No matches' : 'Nobody else is due this week.') : 'No students yet'}</div>`}</div>
       <div class="m-list"><h3><span>Up to date <span class="muted">(${done.length})</span></span></h3>${done.map(doneRow).join('') || '<div class="m-empty">Nobody yet</div>'}</div>
     </div>
-    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts"><button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
+    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts">${c.outcome === 'no-show' && !IS_ADMIN ? '<button data-mswap title="Someone else came in instead">Swap</button>' : ''}<button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
   </div>`;
   $('#main').innerHTML = h;
   const root = $('.mentor');
@@ -1708,6 +1738,7 @@ function renderMentor() {
     if (e.target.closest('[data-mstu]') && sid) return openStudent(stuById(sid));
     const crow = e.target.closest('[data-cid]'), cid = crow ? +crow.dataset.cid : null;
     if (cid && e.target.closest('[data-mdel]')) return deleteCall(cid);
+    if (cid && e.target.closest('[data-mswap]')) return openSwap(M().calls.find(c => c.id === cid));
     if (cid && e.target.closest('[data-medit]')) return openLog({ call: M().calls.find(c => c.id === cid) });
     const day = e.target.closest('.m-day');
     if (day) { const i = [...day.parentNode.querySelectorAll('.m-day')].indexOf(day); goDate(days[i], 'day'); }
@@ -1743,8 +1774,69 @@ function renderMentorCard() {
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
   const awayN = awayList(M().students, M().calls).length;
   el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}/${st.dailyGoal}</b></span><span>Week <b>${w.filter(countsGoal).length}/${st.weeklyGoal}</b></span></div><div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div><div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
-  el.onclick = () => { closeSidebar(); setView('mentor'); };
+  if (!IS_ADMIN) el.insertAdjacentHTML('beforeend', quickBar('side', true));
+  el.onclick = e => { if (e.target.closest('[data-qbar]')) return; closeSidebar(); setView('mentor'); };
 }
+
+/* ---------- quick log: type who came in (one name or several, comma separated) ---------- */
+function quickBar(id, compact) {
+  const names = M().students.filter(x => x.active !== false).map(x => x.name).sort();
+  return `<form class="qbar ${compact ? 'qbar-sm' : ''}" data-qbar="${id}" autocomplete="off">
+    ${compact ? '' : '<b class="qbar-t">Log a pull-out</b>'}
+    <input class="qb-name" list="qbl_${id}" placeholder="${compact ? 'Who came in?' : "Who came in? Type a name (or several: Erik, Habil, Damian)"}" aria-label="Student name">
+    <datalist id="qbl_${id}">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <select class="qb-when" title="When">${['now', '1', '2', '3', '4', 'L', '5', '6', '7'].map(v => `<option value="${v}">${v === 'now' ? 'Now' : v === 'L' ? 'Lunch' : v + ({ 1: 'st', 2: 'nd', 3: 'rd' }[v] || 'th')}</option>`).join('')}</select>
+    <button type="submit" class="btn primary qb-came">Came in</button>
+    <button type="button" class="btn qb-no">Didn't</button>
+    <div class="qb-msg muted sm"></div>
+  </form>`;
+}
+function findStudent(q) {
+  const list = M().students.filter(x => x.active !== false), t = q.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!t) return { none: true };
+  const ex = list.filter(x => x.name.toLowerCase() === t); if (ex.length === 1) return { s: ex[0] };
+  const words = t.split(' ');
+  // "Erik M", "Salomon C", "Murillo", "Jacob R": every typed word starts a word of the name
+  const hit = list.filter(x => { const nw = x.name.toLowerCase().split(/[\s-]+/); return words.every(w => nw.some(n => n.startsWith(w))); });
+  if (hit.length === 1) return { s: hit[0] };
+  if (hit.length > 1) return { many: hit.slice(0, 6) };
+  const sub = list.filter(x => x.name.toLowerCase().includes(t));
+  return sub.length === 1 ? { s: sub[0] } : sub.length ? { many: sub.slice(0, 6) } : { none: true };
+}
+async function quickLogNames(form, outcome) {
+  const inp = form.querySelector('.qb-name'), msg = form.querySelector('.qb-msg'), when = form.querySelector('.qb-when').value;
+  const parts = inp.value.split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+  if (!parts.length) { inp.focus(); return; }
+  const at = when === 'now' ? ymdhm(new Date()) : `${ymd(new Date())}T${PER_TIME[when] || '12:00'}`;
+  const before = callsOn(new Date()).filter(countsGoal).length, done = [], made = [], left = [], notes = [];
+  for (const q of parts) {
+    const r = findStudent(q);
+    if (r.s) {
+      if (callsOn(new Date()).some(c => c.student_id === r.s.id && c.outcome === outcome)) { notes.push(`${r.s.name} is already logged today`); continue; }
+      made.push(await api('POST', 'calls', { student_id: r.s.id, at, method: 'in-person', contact: 'student', outcome, notes: '' }));
+      done.push(r.s.name);
+    } else { left.push(q); if (r.many) notes.push(`"${q}" could be: ${r.many.map(x => `<button type="button" class="linkbtn qb-pick" data-n="${esc(x.name)}">${esc(x.name)}</button>`).join(', ')}`); else notes.push(`No student matches "${esc(q)}"`); }
+  }
+  inp.value = left.join(', ');
+  if (done.length) {
+    await reload();
+    toast(`${outcome === 'reached' ? 'Came in' : "Didn't come in"}: ${done.join(', ')}`, { undo: async () => { for (const c of made) await api('DELETE', 'calls/' + c.id); reload(); } });
+    celebrate(before);
+  }
+  const f2 = $(`[data-qbar="${form.dataset.qbar}"]`) || form;   // the page may have been redrawn
+  f2.querySelector('.qb-name').value = left.join(', ');
+  if (outcome === 'no-show' && made.length) notes.push(made.map(c => `<button type="button" class="linkbtn qb-swap" data-cid="${c.id}">Someone else came instead of ${esc(stuById(c.student_id).name)}?</button>`).join(' · '));
+  f2.querySelector('.qb-msg').innerHTML = notes.join('<br>');
+  f2.querySelector('.qb-name').focus();
+}
+document.addEventListener('submit', e => { const f = e.target.closest('[data-qbar]'); if (!f) return; e.preventDefault(); quickLogNames(f, 'reached'); });
+document.addEventListener('click', e => {
+  const f = e.target.closest('[data-qbar]'); if (!f) return;
+  if (e.target.closest('.qb-no')) { e.preventDefault(); quickLogNames(f, 'no-show'); }
+  const sw = e.target.closest('.qb-swap'); if (sw) { const c = M().calls.find(x => x.id === +sw.dataset.cid); if (c) openSwap(c); return; }
+  const pick = e.target.closest('.qb-pick');
+  if (pick) { const inp = f.querySelector('.qb-name'); const rest = inp.value ? inp.value.split(',').map(x => x.trim()).filter(Boolean) : []; inp.value = [pick.dataset.n, ...rest.slice(1)].join(', '); f.querySelector('.qb-msg').innerHTML = ''; inp.focus(); }
+}, true);
 
 async function quickLog(sid, outcome) {
   const s = stuById(sid);
@@ -1754,6 +1846,7 @@ async function quickLog(sid, outcome) {
   const nd = outcome === 'reached' ? nextDue(stuById(sid)) : null;
   toast(`Logged ${s.name}: ${OUT[outcome].l.toLowerCase()}${nd ? ` · next check-in ${fmtDateShort(nd)}` : ''}`, { undo: async () => { await api('DELETE', 'calls/' + c.id); reload(); } });
   celebrate(before);
+  if (outcome === 'no-show') openSwap(c);   // easy to log who came instead and give them a new date
   
 }
 function celebrate(before) {
@@ -1784,8 +1877,10 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
     <label class="field"><span>Student</span><select id="l_stu">${studs.map(s => `<option value="${s.id}" ${s.id === c.student_id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
     <div class="row"><label class="field"><span>Date</span><input type="date" id="l_d" value="${c.at.slice(0, 10)}"></label><label class="field"><span>Time</span><input type="time" id="l_t" value="${c.at.slice(11, 16)}"></label></div>
     <div class="field"><span>Outcome</span><div class="outs">${Object.entries(OUT).map(([k, o]) => `<label class="out-opt" style="--c:${o.c}"><input type="radio" name="l_o" value="${k}" ${c.outcome === k ? 'checked' : ''}><span>${o.l}</span></label>`).join('')}</div></div>
+  ${call && call.outcome === 'no-show' && !IS_ADMIN ? `<button class="btn" data-swap style="width:100%">Someone else came in instead...</button>` : ''}
   </div>
   <div class="m-foot">${call ? '<button class="btn danger left" data-del>Delete</button>' : '<span class="left muted sm">Ctrl+Enter saves</span>'}<button class="btn" data-x>Cancel</button><button class="btn primary" data-save>Save</button></div>`, 'sm');
+  $('#modal [data-swap]')?.addEventListener('click', () => openSwap(call));
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   const save = async () => {
     const body = { student_id: +$('#l_stu').value, at: `${$('#l_d').value}T${$('#l_t').value || '12:00'}`, method: 'in-person', contact: 'student', outcome: $('#modal input[name=l_o]:checked')?.value || 'reached', notes: '' };
@@ -1797,6 +1892,58 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
   $('#modal [data-save]').onclick = save;
   $('#modal').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } };
   $('#modal [data-del]')?.addEventListener('click', () => { closeModal(); deleteCall(call.id); });
+}
+
+/* ---------- a student didn't come in, so another student who's due this week came instead ---------- */
+function nextOpenDay(d) { let x = addDays(startOfDay(d), 1); for (let i = 0; i < 60 && !openDay(x); i++) x = addDays(x, 1); return x; }
+function openSwap(call) {
+  const x = stuById(call.student_id); if (!x) return;
+  const day = parseD(call.at), ws = startOfWeek(day), we = addDays(ws, 6), dayKey = ymd(day);
+  const wk = M().calls.filter(c => { const k = c.at.slice(0, 10); return k >= ymd(ws) && k <= ymd(we); });
+  const loggedToday = new Set(M().calls.filter(c => c.at.slice(0, 10) === dayKey).map(c => c.student_id));
+  const dueKey = s => { const d = nextDue(s); return d ? ymd(d) : '0000'; };
+  const due = M().students.filter(s => s.active !== false && s.id !== x.id && !loggedToday.has(s.id) && !upToDate(s, we, wk.filter(c => c.student_id === s.id)))
+    .sort((a, b) => dueKey(a).localeCompare(dueKey(b)) || a.name.localeCompare(b.name));
+  const others = M().students.filter(s => s.active !== false && s.id !== x.id && !due.includes(s)).sort((a, b) => a.name.localeCompare(b.name));
+  const per = String(x.period || '').split(/\s*[\/|]\s*/)[0];
+  const row = s => { const d = nextDue(s); return `<button type="button" class="sw-pick" data-sw="${s.id}"><b>${esc(s.name)}</b><span class="muted sm">${s.period ? 'P' + esc(s.period) + ' · ' : ''}${d ? (d < startOfDay(day) ? 'overdue since ' : 'due ') + fmtDateShort(d) : 'not seen yet'}</span></button>`; };
+  const nd = nextOpenDay(day);
+  openModal(`<div class="m-head"><h2>Someone else came instead</h2><button class="iconbtn" data-x>✕</button></div>
+  <div class="m-body">
+    <p style="margin:0"><b>${esc(x.name)}</b> didn't come in (${DAYS[day.getDay()]} ${fmtTime(day)}). Who did you call in instead? They'll be logged as came in at the same time.</p>
+    <input id="sw_q" placeholder="Search all your students..." autocomplete="off">
+    <div class="sw-list" id="sw_list"><div class="sw-h">Due this week (${due.length})</div>${due.map(row).join('') || '<div class="muted sm" style="padding:6px">Nobody else is due this week.</div>'}<div class="sw-h">Everyone else</div>${others.map(row).join('')}</div>
+    <div class="sw-chosen muted sm" id="sw_chosen">Nobody picked yet.</div>
+    <label class="field"><span>New date for ${esc(x.name)}</span><input type="date" id="sw_d" value="${ymd(nd)}"></label>
+    <div class="muted sm">Shows on the calendar as "Next: ${esc(x.name)} (rescheduled)" and on the Mentoring tab. It goes back to every 2 weeks once they come in.</div>
+  </div>
+  <div class="m-foot"><button class="btn left" data-only>Only reschedule ${esc(x.name.split(' ')[0])}</button><button class="btn" data-x>Cancel</button><button class="btn primary" data-sw-save disabled>Save</button></div>`);
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  let pick = null;
+  $('#sw_q').oninput = e => { const q = e.target.value.trim().toLowerCase(); $$('#sw_list .sw-pick').forEach(b => { b.hidden = q && !b.textContent.toLowerCase().includes(q); }); };
+  $('#sw_list').onclick = e => {
+    const b = e.target.closest('[data-sw]'); if (!b) return;
+    $$('#sw_list .sw-pick').forEach(z => z.classList.toggle('on', z === b));
+    pick = stuById(+b.dataset.sw);
+    $('#sw_chosen').innerHTML = `<b style="color:var(--text)">${esc(pick.name)}</b> came in instead. Their next pull-out will be 2 weeks after today.`;
+    $('#modal [data-sw-save]').disabled = false;
+  };
+  const resched = async () => {
+    const d = $('#sw_d').value;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) await api('PUT', 'students/' + x.id, { ...x, nextAt: d, nextSet: ymdhm(new Date()) });
+    return d;
+  };
+  $('#modal [data-only]').onclick = async () => { const d = await resched(); closeModal(); await reload(); toast(`${x.name} rescheduled for ${fmtDateShort(parseD(d))}`); };
+  $('#modal [data-sw-save]').onclick = async () => {
+    if (!pick) return;
+    const before = callsOn(new Date()).filter(countsGoal).length;
+    const made = await api('POST', 'calls', { student_id: pick.id, at: call.at, method: 'in-person', contact: 'student', outcome: 'reached', notes: '' });
+    const d = await resched();
+    closeModal(); await reload();
+    const pn = nextDue(stuById(pick.id));
+    toast(`${pick.name} came in instead${pn ? ` (next: ${fmtDateShort(pn)})` : ''} · ${x.name} rescheduled for ${fmtDateShort(parseD(d))}`, { duration: 9000, undo: async () => { await api('DELETE', 'calls/' + made.id); await api('PUT', 'students/' + x.id, { ...x, nextAt: '', nextSet: '' }); reload(); } });
+    celebrate(before);
+  };
 }
 
 function openStudent(s) {
