@@ -3114,17 +3114,53 @@ function liveSheet(tab) {
   const cells = new Map();
   for (const [row, col, fill, text, parts] of tab.cells || []) {
     const cell = { row, col, text: String(text).replace(/\r/g, ''), color: hexRgb(fill) };
-    if (parts) {   // color of each line = the colored text on it (most characters wins)
-      const lines = [new Map()];
+    if (parts) {
+      // names written in different colors in one cell, even on the same line: each colored piece is its own line
+      const segs = [];   // [text, color]
       for (const [t, h] of parts) {
-        const segs = String(t).split('\n');
-        segs.forEach((seg, i) => { if (i) lines.push(new Map()); const col2 = textOutcomeColor(h); if (col2 && seg.trim()) { const k = col2.join(); lines[lines.length - 1].set(k, (lines[lines.length - 1].get(k) || 0) + seg.trim().length); } });
+        const col2 = textOutcomeColor(h);
+        String(t).replace(/\r/g, '').split('\n').forEach((piece, i) => {
+          const last = segs[segs.length - 1];
+          if (i > 0 || !last) segs.push([piece, col2]);
+          else if (!piece.trim() || !col2 || !last[1] || last[1].join() === col2.join()) { last[0] += piece; if (!last[1] && col2 && piece.trim()) last[1] = col2; }
+          else segs.push([piece, col2]);
+        });
       }
-      cell.lineColors = lines.map(m => { const best = [...m].sort((a, b) => b[1] - a[1])[0]; return best ? best[0].split(',').map(Number) : null; });
+      const keep = segs.filter(x => x[0].trim());
+      cell.text = keep.map(x => x[0].trim()).join('\n');
+      cell.lineColors = keep.map(x => x[1]);
     }
     cells.set(row + ',' + col, cell);
   }
   return { name: tab.name, cells };
+}
+// what the planner tabs say: pull-outs (name, date, period, outcome) and roster students not on this calendar yet
+function liveCheckins(tabs, localNames) {
+  const now = {}, newStu = [];
+  const localMatch = makeMatcher(localNames), toLocal = n => { const k = plNorm(n), hit = localNames.find(x => plNorm(x) === k); if (hit) return hit; const r = localMatch(n); return r.found.length === 1 ? r.found[0].name : null; };
+  for (const tab of tabs) {
+    const a = analyzeXlsx([liveSheet(tab)]);
+    const roster = a.rosterTSV ? parseRoster(a.rosterTSV) : [];
+    for (const s of roster) { s.period = fixPeriod(s.period); const m = (s.notes || '').match(/^\s*([A-Z][a-z]+)['’]s\b\s*(?:·\s*)?(.*)$/); if (m) { s.mentor = m[1]; s.notes = m[2]; } }
+    const theirs = new Set(roster.filter(s => s.mentor && s.mentor.toLowerCase() !== tab.name.toLowerCase()).map(s => plNorm(s.name)));   // "Isabel's" students on Daisy's tab
+    const rosterLocal = new Map();
+    for (const s of roster) { if (theirs.has(plNorm(s.name))) continue; const l = toLocal(s.name); if (l) rosterLocal.set(plNorm(s.name), l); else newStu.push({ ...s, mentor: tab.name }); }
+    const names = [...new Set(localNames.concat(roster.map(s => s.name)))];
+    for (const ck of planCheckins(a.lines, names).checkins) {
+      if (ck.unknown || theirs.has(plNorm(ck.name))) continue;
+      const name = rosterLocal.get(plNorm(ck.name)) || toLocal(ck.name) || ck.name;
+      now[[plNorm(name), ck.date, ck.period || ''].join('|')] = { name, date: ck.date, period: ck.period || '', outcome: ck.outcome, roster: [...rosterLocal.values()].includes(name) };
+    }
+  }
+  // one name read as two people ("Juan Diego Guzman 3rd" -> Diego Guzman and Juan Diego Lopez): same day and period, a shared word: keep the one on the roster
+  const vals = Object.entries(now);
+  for (const [k, v] of vals) {
+    if (v.roster) continue;
+    const words = new Set(plNorm(v.name).split(' '));
+    if (vals.some(([k2, w]) => k2 !== k && w.roster && w.date === v.date && (w.period === v.period || !v.period || !w.period) && plNorm(w.name).split(' ').some(x => words.has(x)))) delete now[k];
+  }
+  for (const v of Object.values(now)) delete v.roster;
+  return { now, newStu };
 }
 
 /* ======================================================================== team sync through a shared Google Sheet */
@@ -3275,23 +3311,9 @@ async function plannerLiveSync(c, force = false, dry = false) {
   if (!j || !j.ok || !(j.tabs || []).length) return false;
   const stateKey = 'yes.live.' + LS_KEY + '.' + String(c.name).toLowerCase();
   let prev = null; try { prev = JSON.parse(store.get(stateKey) || 'null'); } catch { prev = null; }
-  const now = {}, newStu = [];
   let changed = false;
   const local = () => new Map(Mall().students.filter(s => !s.src).map(s => [plNorm(s.name), s]));
-  for (const tab of j.tabs) {
-    const a = analyzeXlsx([liveSheet(tab)]);
-    const roster = a.rosterTSV ? parseRoster(a.rosterTSV) : [];
-    for (const s of roster) { s.period = fixPeriod(s.period); const m = (s.notes || '').match(/^\s*([A-Z][a-z]+)['’]s\b\s*(?:·\s*)?(.*)$/); if (m) { s.mentor = m[1]; s.notes = m[2]; } }
-    const theirs = new Set(roster.filter(s => s.mentor && s.mentor.toLowerCase() !== tab.name.toLowerCase()).map(s => plNorm(s.name)));   // "Isabel's" students on Daisy's tab
-    const mine = roster.filter(s => !theirs.has(plNorm(s.name)));
-    const have = local();
-    for (const s of mine) if (!have.has(plNorm(s.name))) newStu.push({ ...s, mentor: tab.name });
-    const names = [...new Set([...have.values()].map(s => s.name).concat(roster.map(s => s.name)))];
-    for (const ck of planCheckins(a.lines, names).checkins) {
-      if (ck.unknown || theirs.has(plNorm(ck.name))) continue;
-      now[[plNorm(ck.name), ck.date, ck.period || ''].join('|')] = { name: ck.name, date: ck.date, period: ck.period || '', outcome: ck.outcome };
-    }
-  }
+  const { now, newStu } = liveCheckins(j.tabs, [...local().values()].map(s => s.name));
   plan.newStudents = newStu.map(s => s.name);
   if (newStu.length && !dry) { const r = await api('POST', 'students-import', { rows: newStu }); if (r.imported) { changed = true; await reload(); } }
   const have = local(), add = [];
@@ -3936,7 +3958,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119144642';
+const BUILD_ID = '20261119145035';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
