@@ -3123,7 +3123,8 @@ function syncPayload(c) {
   const own = Mall().students.filter(s => { if (s.src) return false; const t = (s.mentor || '').trim().toLowerCase(); return !t || t === me || t.split(/\s+/)[0] === me.split(/\s+/)[0] || helped.includes(t); }), ids = new Set(own.map(s => s.id));
   return {
     action: 'push', name: c.name,
-    students: own.map(s => ({ name: s.name, mentor: s.mentor || c.name, grade: s.grade, idnum: c.noIds === false ? s.idnum : '', period: s.period, classes: s.classes, room: s.room, teacher: s.teacher, active: s.active !== false })),
+    students: own.map(s => ({ name: s.name, mentor: s.mentor || c.name, grade: s.grade, idnum: c.noIds === false ? s.idnum : '', period: s.period, classes: s.classes, room: s.room, teacher: s.teacher, active: s.active !== false, nextAt: s.nextAt || '', nextSet: s.nextSet || '', absentOn: s.absentOn || '' })),
+    sched: true,
     calls: Mall().calls.filter(x => ids.has(x.student_id))   // all of them, even when the screen is filtered.sort((a, b) => a.at.localeCompare(b.at))
       .map(x => ({ student: stuById(x.student_id).name, date: x.at.slice(0, 10), time: x.at.slice(11, 16), result: x.outcome === 'reached' ? 'Came in' : "Didn't come in" })),
   };
@@ -3146,18 +3147,22 @@ async function mentorSync(c) {
     const toMap = v => Array.isArray(v) ? Object.fromEntries(v.map(k => [k, null])) : (v || {});
     const bSv = toMap(base && base.s), bCv = toMap(base && base.c);
     const bS = new Set(Object.keys(bSv)), bC = new Set(Object.keys(bCv));
-    const sSig = x => JSON.stringify([x.mentor || '', x.grade || '', x.period || '', x.classes || '', x.room || '', x.teacher || '', x.active !== false]);
+    // the "next check-in" moved by hand (absent / someone came instead) travels too, once the Sheet has those columns
+    const sSig = x => JSON.stringify([x.mentor || '', x.grade || '', x.period || '', x.classes || '', x.room || '', x.teacher || '', x.active !== false].concat(remote.sched ? [x.nextAt || '', x.nextSet || '', x.absentOn || ''] : []));
     const lS = new Map(pl.students.map(x => [x.name.trim().toLowerCase(), x])), lC = new Map(pl.calls.map(x => [ckey(x.student, x.date, x.time), x]));
     const rS = new Map(remote.students.map(x => [x.name.trim().toLowerCase(), x])), rC = new Map(remote.calls.map(x => [ckey(x.student, x.date, x.time), x]));
     // new on the Sheet (from another device): bring them here
     const addS = [...rS.entries()].filter(([k]) => !lS.has(k) && !bS.has(k)).map(([, x]) => x);
     const addC = [...rC.entries()].filter(([k]) => !lC.has(k) && !bC.has(k)).map(([, x]) => x);
     // deleted on another device (was on the Sheet last time, gone now): remove here
-    const goneC = [...lC.keys()].filter(k => bC.has(k) && !rC.has(k));
+    let goneC = [...lC.keys()].filter(k => bC.has(k) && !rC.has(k)), goneS = [...lS.keys()].filter(k => bS.has(k) && !rS.has(k));
+    // ...unless the Sheet was cleared or a backup was restored: then put this device's data back instead of wiping it
+    const wiped = (!rS.size && !rC.size) || goneC.length > Math.max(20, bC.size / 2) || goneS.length > Math.max(5, bS.size / 2);
+    if (wiped) { goneC = []; goneS = []; }
     let changed = false;
     if (addS.length) {
       const have = new Set(Mall().students.map(s => s.name.trim().toLowerCase()));
-      const rows = addS.filter(x => !have.has(x.name.trim().toLowerCase())).map(x => ({ name: x.name, mentor: x.mentor || c.name, grade: x.grade, idnum: x.idnum, period: x.period, classes: x.classes, room: x.room, teacher: x.teacher, active: x.active }));
+      const rows = addS.filter(x => !have.has(x.name.trim().toLowerCase())).map(x => ({ name: x.name, mentor: x.mentor || c.name, grade: x.grade, idnum: x.idnum, period: x.period, classes: x.classes, room: x.room, teacher: x.teacher, active: x.active, nextAt: x.nextAt || '', nextSet: x.nextSet || '', absentOn: x.absentOn || '' }));
       if (rows.length) { await api('POST', 'students-import', { rows }); changed = true; }
     }
     if (addC.length) {
@@ -3169,7 +3174,7 @@ async function mentorSync(c) {
     for (const [k, rx] of rC) {
       const lx = lC.get(k); if (!lx || !(k in bCv) || bCv[k] == null) continue;
       if (RES(rx.result) !== bCv[k] && RES(lx.result) === bCv[k]) {
-        const call = M().calls.find(cl => { const st = stuById(cl.student_id); return st && ckey(st.name, cl.at.slice(0, 10), cl.at.slice(11, 16)) === k; });
+        const call = Mall().calls.find(cl => { const st = stuById(cl.student_id); return st && ckey(st.name, cl.at.slice(0, 10), cl.at.slice(11, 16)) === k; });
         if (call) { await api('PUT', 'calls/' + call.id, { ...call, outcome: RES(rx.result) }); changed = true; }
       }
     }
@@ -3177,19 +3182,24 @@ async function mentorSync(c) {
       const lx = lS.get(k); if (!lx || !(k in bSv) || bSv[k] == null) continue;
       if (sSig(rx) !== bSv[k] && sSig(lx) === bSv[k]) {
         const st = Mall().students.find(x => x.name.trim().toLowerCase() === k);
-        if (st) { await api('PUT', 'students/' + st.id, { ...st, grade: rx.grade, period: rx.period, classes: rx.classes, room: rx.room, teacher: rx.teacher, active: rx.active !== false }); changed = true; }
+        if (st) { await api('PUT', 'students/' + st.id, { ...st, grade: rx.grade, period: rx.period, classes: rx.classes, room: rx.room, teacher: rx.teacher, active: rx.active !== false, ...(remote.sched ? { nextAt: rx.nextAt || '', nextSet: rx.nextSet || '', absentOn: rx.absentOn || '' } : {}) }); changed = true; }
       }
+    }
+    if (goneS.length) {
+      const del = new Set(goneS);
+      for (const st of Mall().students.slice()) if (!st.src && del.has(st.name.trim().toLowerCase())) { try { await api('DELETE', 'students/' + st.id); } catch { /* already gone */ } changed = true; }
+      await reload();   // their pull-outs went with them
     }
     if (goneC.length) {
       const del = new Set(goneC);
-      for (const call of M().calls.slice()) { const st = stuById(call.student_id); if (st && del.has(ckey(st.name, call.at.slice(0, 10), call.at.slice(11, 16)))) { await api('DELETE', 'calls/' + call.id); changed = true; } }
+      for (const call of Mall().calls.slice()) { const st = stuById(call.student_id); if (st && del.has(ckey(st.name, call.at.slice(0, 10), call.at.slice(11, 16)))) { try { await api('DELETE', 'calls/' + call.id); } catch { /* already gone */ } changed = true; } }
     }
     if (changed) { await reload(); pl = syncPayload(c); }
     // deleted on this device since last time: tell the Sheet
     const nowS = new Set(pl.students.map(x => x.name.trim().toLowerCase())), nowC = new Set(pl.calls.map(x => ckey(x.student, x.date, x.time)));
     pl.merge = true;
-    pl.delStudents = base ? [...bS].filter(k => !nowS.has(k) && rS.has(k)) : [];
-    pl.delCalls = base ? [...bC].filter(k => !nowC.has(k) && rC.has(k)) : [];
+    pl.delStudents = base && !wiped ? [...bS].filter(k => !nowS.has(k) && rS.has(k)) : [];
+    pl.delCalls = base && !wiped ? [...bC].filter(k => !nowC.has(k) && rC.has(k)) : [];
     if (pl.students.length || pl.calls.length || pl.delStudents.length || pl.delCalls.length) await syncCall(pl, c);
     store.set(baseKey, JSON.stringify({ s: Object.fromEntries(pl.students.map(x => [x.name.trim().toLowerCase(), sSig(x)])), c: Object.fromEntries(pl.calls.map(x => [ckey(x.student, x.date, x.time), RESULT(x.result)])) }));
     if (changed && $('#modalWrap').hidden) render();
@@ -3815,7 +3825,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119141121';
+const BUILD_ID = '20261119142652';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
