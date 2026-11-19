@@ -1801,7 +1801,7 @@ function renderMentor() {
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && mentors.length > 1 ? `<select id="mmentor"><option value="">All mentors</option>${mentors.map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -1845,6 +1845,7 @@ function renderMentor() {
     if (a === 'send') return openSend();
     if (a === 'logins') return openLogins();
     if (a === 'coverage') return openCoverage();
+    if (a === 'report') return openReport();
     if (a === 'ittools') return openIT();
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
     if (a === 'roster') return openRoster();
@@ -2446,6 +2447,156 @@ function teamNamesAll() {
   const n = [...Mall().students.map(s => s.mentor).filter(Boolean), ...Object.keys(syncLastBy()), ...((window.YES_ADMIN && window.YES_ADMIN.sampleMentors) || []), ...((typeof SY !== 'undefined' && SY.planners) || []).map(p => p.name)];
   const seen = new Map(); for (const x of n) { const k = x.trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, x.trim()); }
   return [...seen.values()].sort();
+}
+
+
+/* ======================================================================== admin: printable report for each mentor */
+const REPORT_SKIP = ['abel'];   // helpers, not mentors: their pull-outs count on the mentor's list
+function reportMentors() { return teamNamesAll().filter(n => !REPORT_SKIP.includes(n.trim().toLowerCase().split(/\s+/)[0]) && Mall().students.some(s => s.mentor === n)); }
+function openReport() {
+  const names = reportMentors(), today = startOfDay(new Date());
+  const firstCall = Mall().calls.map(c => c.at).sort()[0];
+  openModal(`<div class="m-head"><h2>Print report</h2><button class="iconbtn" data-x>✕</button></div>
+  <div class="m-body">
+    <label class="field"><span>Time period</span><select id="rp_range">
+      <option value="week">This week</option><option value="lastweek">Last week</option><option value="month" selected>This month</option><option value="lastmonth">Last month</option><option value="year">School year so far</option><option value="custom">Pick dates...</option></select></label>
+    <div class="row" id="rp_custom" hidden><label class="field"><span>From</span><input type="date" id="rp_a" value="${firstCall ? firstCall.slice(0, 10) : ymd(addDays(today, -30))}"></label><label class="field"><span>To</span><input type="date" id="rp_b" value="${ymd(today)}"></label></div>
+    <div class="field"><span>Mentors</span><div class="row" style="flex-wrap:wrap;gap:10px">${names.map(n => `<label class="row" style="gap:4px"><input type="checkbox" class="rp_m" value="${esc(n)}" checked> ${esc(n)}</label>`).join('') || '<span class="muted">No mentors yet.</span>'}</div></div>
+    <label class="row" style="gap:6px"><input type="checkbox" id="rp_list" checked> Include each mentor's student list</label>
+    <div class="muted sm">Abel isn't listed: he works Daisy's students, so his pull-outs count on her report.</div>
+  </div>
+  <div class="m-foot"><button class="btn" data-x>Cancel</button><button class="btn primary" id="rp_go">Open report</button></div>`, 'sm');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  $('#rp_range').onchange = e => { $('#rp_custom').hidden = e.target.value !== 'custom'; };
+  $('#rp_go').onclick = () => {
+    const r = $('#rp_range').value, ws = startOfWeek(today);
+    let a, b, label;
+    if (r === 'week') { a = ws; b = addDays(ws, 6); label = 'Week of ' + fmtDateShort(ws); }
+    else if (r === 'lastweek') { a = addDays(ws, -7); b = addDays(ws, -1); label = 'Week of ' + fmtDateShort(a); }
+    else if (r === 'month') { a = new Date(today.getFullYear(), today.getMonth(), 1); b = new Date(today.getFullYear(), today.getMonth() + 1, 0); label = MONTHS[today.getMonth()] + ' ' + today.getFullYear(); }
+    else if (r === 'lastmonth') { a = new Date(today.getFullYear(), today.getMonth() - 1, 1); b = new Date(today.getFullYear(), today.getMonth(), 0); label = MONTHS[a.getMonth()] + ' ' + a.getFullYear(); }
+    else if (r === 'year') { a = firstCall ? startOfDay(parseD(firstCall)) : addDays(today, -60); b = today; label = 'School year so far'; }
+    else { a = parseD($('#rp_a').value); b = parseD($('#rp_b').value); if (!(a <= b)) return toast('Pick a start date before the end date.'); label = fmtDateShort(a) + ' – ' + fmtDateShort(b); }
+    const pick = $$('#modal .rp_m').filter(x => x.checked).map(x => x.value);
+    if (!pick.length) return toast('Pick at least one mentor.');
+    const keep = S.mmentor; S.mmentor = ''; _mOwn = { key: null, val: null };   // figure every mentor from the whole team
+    let html; try { html = reportHTML(pick, a, b, label, $('#rp_list').checked); } finally { S.mmentor = keep; _mOwn = { key: null, val: null }; }
+    const w = window.open('', '_blank');
+    if (!w) return toast('Your browser blocked the report window. Allow pop-ups for this site and try again.');
+    w.document.open(); w.document.write(html); w.document.close();
+    closeModal();
+  };
+}
+function reportStats(name, a, b) {
+  const today = startOfDay(new Date()), endC = b < today ? b : today;
+  const studs = Mall().students.filter(s => s.mentor === name && s.active !== false), ids = new Set(studs.map(s => s.id));
+  const all = Mall().calls.filter(c => ids.has(c.student_id));
+  const inR = all.filter(c => { const d = c.at.slice(0, 10); return d >= ymd(a) && d <= ymd(b); });
+  const came = inR.filter(c => c.outcome === 'reached');
+  const days = []; for (let d = startOfDay(a); d <= endC; d = addDays(d, 1)) if (openDay(d)) days.push(ymd(d));
+  const perDay = new Map(days.map(d => [d, 0])); for (const c of came) { const k = c.at.slice(0, 10); if (perDay.has(k)) perDay.set(k, perDay.get(k) + 1); }
+  const seen = new Set(came.map(c => c.student_id));
+  // days between visits, per student, over all history up to the end of the period
+  const gaps = [];
+  for (const s of studs) {
+    const v = all.filter(c => c.student_id === s.id && c.outcome === 'reached' && c.at.slice(0, 10) <= ymd(b)).map(c => c.at.slice(0, 10)).sort();
+    for (let i = 1; i < v.length; i++) if (v[i] >= ymd(a)) gaps.push(dayDiff(parseD(v[i - 1]), parseD(v[i])));
+  }
+  const goal = teamGoal(name).dailyGoal;
+  const weeks = Math.max(1, days.length / 5);
+  const ls = lastSeenMap(all.filter(c => c.at.slice(0, 10) <= ymd(b)));
+  const rows = studs.map(s => {
+    const mine = inR.filter(c => c.student_id === s.id), c1 = mine.filter(c => c.outcome === 'reached').length, last = ls.get(s.id), nd = nextDue(s);
+    const away = last ? (openDaysSince(last) >= AWAY_DAYS) : true;
+    return { s, came: c1, missed: mine.length - c1, last, nd, away };
+  }).sort((x, y) => (x.last || '').localeCompare(y.last || '') || x.s.name.localeCompare(y.s.name));
+  const bestDay = [...perDay.entries()].sort((x, y) => y[1] - x[1])[0];
+  return {
+    name, students: studs.length, pulls: inR.length, came: came.length, missed: inR.length - came.length,
+    rate: inR.length ? came.length / inR.length : null, seen: seen.size, coverage: studs.length ? seen.size / studs.length : null,
+    days: days.length, perDayAvg: days.length ? came.length / days.length : null, perWeekAvg: came.length / weeks,
+    perStudent: studs.length ? came.length / studs.length : null, gap: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : null,
+    goal, goalDays: goal ? days.filter(d => perDay.get(d) >= goal).length : null,
+    away: rows.filter(r => r.away).length, upToDate: studs.filter(s => { const d = nextDue(s); return d && d > today; }).length,
+    perDay, bestDay, rows,
+  };
+}
+function reportHTML(names, a, b, label, withList) {
+  const S2 = names.map(n => reportStats(n, a, b));
+  const pct = v => v == null ? '–' : Math.round(v * 100) + '%', num = (v, d = 1) => v == null ? '–' : (Math.round(v * 10 ** d) / 10 ** d).toString();
+  const sum = k => S2.reduce((x, s) => x + (s[k] || 0), 0);
+  const T = { students: sum('students'), pulls: sum('pulls'), came: sum('came'), missed: sum('missed'), seen: sum('seen'), away: sum('away'), upToDate: sum('upToDate') };
+  const avg = k => { const v = S2.map(s => s[k]).filter(x => x != null); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
+  const e = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const gen = new Date();
+  const bars = st => {
+    const ent = [...st.perDay.entries()]; if (!ent.length) return '<p class="muted">No school days in this period.</p>';
+    const max = Math.max(st.goal || 0, ...ent.map(x => x[1]), 1), w = Math.max(6, Math.min(26, Math.floor(640 / ent.length) - 3));
+    return `<div class="chart">${st.goal ? `<div class="gl" style="bottom:${st.goal / max * 100}%"><span>goal ${st.goal}</span></div>` : ''}${ent.map(([d, v]) => `<div class="bar" style="width:${w}px" title="${d}: ${v}"><i style="height:${v / max * 100}%" class="${st.goal && v >= st.goal ? 'met' : ''}"></i></div>`).join('')}</div>
+      <div class="axis"><span>${fmtDateShort(parseD(ent[0][0]))}</span><span>${fmtDateShort(parseD(ent[ent.length - 1][0]))}</span></div>`;
+  };
+  const tile = (l, v, sub) => `<div class="tile"><div class="tl">${l}</div><div class="tv">${v}</div>${sub ? `<div class="ts">${sub}</div>` : ''}</div>`;
+  const mentorPage = st => `<section class="page">
+    <div class="ph"><div><div class="kicker">Mentor report</div><h2>${e(st.name)}</h2></div><div class="pr">${e(label)}<br><span class="muted">${st.days} school day${st.days === 1 ? '' : 's'}</span></div></div>
+    <div class="tiles">
+      ${tile('Students', st.students)}
+      ${tile('Came in', st.came, `${st.missed} didn't come in`)}
+      ${tile('Came-in rate', pct(st.rate), `of ${st.pulls} pull-outs`)}
+      ${tile('Avg per school day', num(st.perDayAvg), st.goal ? `goal ${st.goal} · met ${st.goalDays} of ${st.days} days` : 'came in per day')}
+      ${tile('Avg per week', num(st.perWeekAvg), 'came in per week')}
+      ${tile('Students seen', `${st.seen} <small>/ ${st.students}</small>`, `${pct(st.coverage)} of caseload`)}
+      ${tile('Visits per student', num(st.perStudent, 2), 'in this period')}
+      ${tile('Avg days between visits', num(st.gap), 'goal: about 14')}
+      ${tile('Not seen 2+ weeks', st.away, 'as of the end of the period')}
+    </div>
+    <h3>Came in per school day</h3>${bars(st)}
+    ${withList ? `<h3>Students <span class="muted">(longest since seen first)</span></h3>
+    <table class="list"><thead><tr><th>Student</th><th>Gr</th><th>Period</th><th class="n">Came in</th><th class="n">Didn't</th><th>Last came in</th><th>Next</th><th></th></tr></thead><tbody>
+    ${st.rows.map(r => `<tr class="${r.away ? 'away' : ''}"><td>${e(r.s.name)}</td><td>${e(r.s.grade || '')}</td><td>${e(r.s.period || '')}</td><td class="n">${r.came}</td><td class="n">${r.missed}</td><td>${r.last ? fmtDateShort(parseD(r.last)) : '<span class="muted">never</span>'}</td><td>${r.nd ? (r.nd < startOfDay(new Date()) ? '<span class="flag">overdue</span> ' + fmtDateShort(r.nd) : fmtDateShort(r.nd)) : '<span class="muted">not seen</span>'}</td><td>${r.away ? '<span class="flag">2+ wks</span>' : ''}</td></tr>`).join('')}
+    </tbody></table>` : ''}
+  </section>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>IYT Mentoring Report · ${e(label)}</title><style>
+  @page{size:letter;margin:0.55in}
+  *{box-sizing:border-box}body{font:11pt/1.4 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1d232b;margin:0;background:#eef0f3}
+  .doc{max-width:8.5in;margin:0 auto}.page{background:#fff;padding:.55in;margin:18px 0;box-shadow:0 2px 12px rgba(0,0,0,.12);break-after:page}
+  .page:last-child{break-after:auto}
+  .bar0{display:flex;justify-content:flex-end;gap:8px;max-width:8.5in;margin:14px auto 0}.bar0 button{font:inherit;padding:7px 16px;border-radius:6px;border:1px solid #1f4e79;background:#1f4e79;color:#fff;cursor:pointer}.bar0 button.alt{background:#fff;color:#1f4e79}
+  h1{font-size:22pt;margin:0;color:#1f4e79;letter-spacing:-.3px}h2{font-size:18pt;margin:0;color:#1f4e79}h3{font-size:11pt;margin:18px 0 6px;color:#1f4e79;text-transform:uppercase;letter-spacing:.06em;border-bottom:1.5px solid #1f4e79;padding-bottom:3px}
+  .muted{color:#6b7480}.kicker{font-size:9pt;text-transform:uppercase;letter-spacing:.12em;color:#6b7480;font-weight:600}
+  .ph{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #1f4e79;padding-bottom:8px;margin-bottom:14px}.pr{text-align:right;font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tile{border:1px solid #d5dae1;border-radius:6px;padding:8px 10px;break-inside:avoid}
+  .tl{font-size:8pt;text-transform:uppercase;letter-spacing:.06em;color:#6b7480;font-weight:600}.tv{font-size:19pt;font-weight:700;color:#1d232b;line-height:1.15}.tv small{font-size:11pt;color:#6b7480;font-weight:600}.ts{font-size:8.5pt;color:#6b7480}
+  table{width:100%;border-collapse:collapse;font-size:9.5pt}th{text-align:left;font-size:8pt;text-transform:uppercase;letter-spacing:.05em;color:#fff;background:#1f4e79;padding:5px 6px}td{padding:4px 6px;border-bottom:1px solid #e3e7ec}tr:nth-child(even) td{background:#f6f8fa}
+  td.n,th.n{text-align:right}tr{break-inside:avoid}.sum td{font-weight:700;border-top:2px solid #1f4e79;background:#eef3f8!important}.avg td{font-style:italic;color:#3c4652;background:#fafbfc!important}
+  .flag{color:#b42318;font-weight:600;font-size:8.5pt}tr.away td:first-child{border-left:3px solid #b42318}
+  .chart{position:relative;height:110px;display:flex;align-items:flex-end;gap:3px;border-bottom:1px solid #9aa4b0;padding-top:6px}.bar{height:100%;display:flex;align-items:flex-end}.bar i{display:block;width:100%;background:#7ea6cf;border-radius:2px 2px 0 0;min-height:1px}.bar i.met{background:#2e7d4f}
+  .gl{position:absolute;left:0;right:0;border-top:1.5px dashed #2e7d4f}.gl span{position:absolute;right:0;top:-14px;font-size:7.5pt;color:#2e7d4f}.axis{display:flex;justify-content:space-between;font-size:8pt;color:#6b7480}
+  .legend{font-size:8.5pt;color:#6b7480;margin-top:6px}.foot{font-size:8pt;color:#6b7480;margin-top:16px;border-top:1px solid #e3e7ec;padding-top:6px}
+  @media print{body{background:#fff}.bar0{display:none}.page{box-shadow:none;margin:0;padding:0}.doc{max-width:none}}
+  </style></head><body>
+  <div class="bar0"><button class="alt" onclick="window.close()">Close</button><button onclick="window.print()">Print / Save as PDF</button></div>
+  <div class="doc">
+  <section class="page">
+    <div class="ph"><div><div class="kicker">Improve Your Tomorrow · Grace M. Davis</div><h1>Mentoring Report</h1></div><div class="pr">${e(label)}<br><span class="muted">${fmtDateShort(a)} – ${fmtDateShort(b)}</span></div></div>
+    <div class="tiles">
+      ${tile('Students', T.students, `${S2.length} mentor${S2.length === 1 ? '' : 's'}`)}
+      ${tile('Came in', T.came, `${T.missed} didn't come in`)}
+      ${tile('Came-in rate', pct(T.pulls ? T.came / T.pulls : null), `of ${T.pulls} pull-outs`)}
+      ${tile('Students seen', `${T.seen} <small>/ ${T.students}</small>`, `${pct(T.students ? T.seen / T.students : null)} of all students`)}
+      ${tile('Not seen 2+ weeks', T.away, 'as of the end of the period')}
+      ${tile('Avg days between visits', num(avg('gap')), 'average across mentors')}
+    </div>
+    <h3>By mentor</h3>
+    <table><thead><tr><th>Mentor</th><th class="n">Students</th><th class="n">Pull-outs</th><th class="n">Came in</th><th class="n">Rate</th><th class="n">Per day</th><th class="n">Per week</th><th class="n">Seen</th><th class="n">Days between</th><th class="n">2+ wks</th></tr></thead><tbody>
+    ${S2.map(s => `<tr><td><b>${e(s.name)}</b>${s.goal ? ` <span class="muted">(goal ${s.goal}/day)</span>` : ''}</td><td class="n">${s.students}</td><td class="n">${s.pulls}</td><td class="n">${s.came}</td><td class="n">${pct(s.rate)}</td><td class="n">${num(s.perDayAvg)}</td><td class="n">${num(s.perWeekAvg)}</td><td class="n">${pct(s.coverage)}</td><td class="n">${num(s.gap)}</td><td class="n">${s.away}</td></tr>`).join('')}
+    <tr class="sum"><td>Team total</td><td class="n">${T.students}</td><td class="n">${T.pulls}</td><td class="n">${T.came}</td><td class="n">${pct(T.pulls ? T.came / T.pulls : null)}</td><td class="n">${num(sum('perDayAvg'))}</td><td class="n">${num(sum('perWeekAvg'))}</td><td class="n">${pct(T.students ? T.seen / T.students : null)}</td><td class="n">–</td><td class="n">${T.away}</td></tr>
+    <tr class="avg"><td>Average per mentor</td><td class="n">${num(T.students / S2.length)}</td><td class="n">${num(T.pulls / S2.length)}</td><td class="n">${num(T.came / S2.length)}</td><td class="n">${pct(avg('rate'))}</td><td class="n">${num(avg('perDayAvg'))}</td><td class="n">${num(avg('perWeekAvg'))}</td><td class="n">${pct(avg('coverage'))}</td><td class="n">${num(avg('gap'))}</td><td class="n">${num(T.away / S2.length)}</td></tr>
+    </tbody></table>
+    <div class="legend"><b>Rate</b>: share of pull-outs where the student came in. <b>Per day / per week</b>: students who came in, averaged over school days (weekends and closed days don't count). <b>Seen</b>: students who came in at least once in the period. <b>Days between</b>: average days between a student's visits. <b>2+ wks</b>: students not seen for 2 or more school weeks.</div>
+    <div class="foot">Generated ${fmtDateShort(gen)} ${fmtTime(gen)} from the team Sheet · Yes Calendar</div>
+  </section>
+  ${S2.map(mentorPage).join('')}
+  </div></body></html>`;
 }
 
 /* ======================================================================== import a mentor planner (PDF or Excel) */
@@ -3535,7 +3686,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261118225556';
+const BUILD_ID = '20261118231427';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
