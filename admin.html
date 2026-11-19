@@ -481,7 +481,7 @@ td.cv-closed,.cv-key i.cv-closed,.cv-tbl thead th.cv-closed{background:repeating
 .sw-pick{display:flex;justify-content:space-between;gap:10px;align-items:center;text-align:left;border:1px solid var(--s1);background:var(--base);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;cursor:pointer}
 .sw-pick:hover{border-color:var(--accent)}
 .sw-pick.on{border-color:var(--green);background:color-mix(in srgb,var(--green) 18%,var(--base))}
-.ms-acts button[data-mswap]{width:auto;padding:0 8px;font-size:12px}
+.ms-acts button[data-mswap],.ms-acts button[data-absent]{width:auto;padding:0 8px;font-size:12px}
 .due-card{gap:3px!important;font-size:14px;line-height:1.45}
 
 /* seasonal decorations + theme picker */
@@ -507,6 +507,8 @@ html[data-season]:not([data-season=""]) .topbar .btn:hover,html[data-season]:not
 html[data-season]:not([data-season=""]) .topbar .seg button.on{background:#fff;color:var(--topbar);border-color:#fff;font-weight:bold}
 html[data-season]:not([data-season=""]) .search input{background:#fff;color:#222;border:1px solid #fff}
 html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text)}
+/* new version banner */
+.upd-bar{position:fixed;left:50%;top:52px;transform:translateX(-50%);z-index:90;display:flex;align-items:center;gap:10px;background:var(--base);color:var(--text);border:1px solid var(--accent);border-radius:12px;padding:8px 10px 8px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:14px}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1162,6 +1164,7 @@ function cleanStudent(b, base) {
   // a date picked by hand for their next pull-out (after they missed one); cleared once they come in again
   if (b && 'nextAt' in b) t.nextAt = /^\d{4}-\d{2}-\d{2}$/.test(b.nextAt || '') ? b.nextAt : '';
   if (b && 'nextSet' in b) t.nextSet = String(b.nextSet || '').slice(0, 16);
+  if (b && 'absentOn' in b) t.absentOn = /^\d{4}-\d{2}-\d{2}$/.test(b.absentOn || '') ? b.absentOn : '';
   return t;
 }
 function cleanCall(b, base) {
@@ -1788,7 +1791,7 @@ function renderMentor() {
   const away = awayList(M().students, M().calls), awayIds = new Map(away.map(x => [x.s.id, x]));
 
   const phoneLinks = s => s.phone ? `<a href="${telHref(s.phone)}" title="Call">${esc(s.phone)}</a>` : '';
-  const acts = s => IS_ADMIN ? '' : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>`;
+  const acts = s => IS_ADMIN ? '' : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
   const needRow = s => {
     const tries = (wk.get(s.id) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), lr = lastCall(s.id, c => c.outcome === 'reached');
     const lt = tries[tries.length - 1];
@@ -1796,7 +1799,7 @@ function renderMentor() {
       ? `${tries.length} pull-out${tries.length > 1 ? 's' : ''} this week · last <span class="ob" style="--c:${OUT[lt.outcome]?.c}">${OUT[lt.outcome]?.l}</span> ${relDay(lt.at)}`
       : lr ? `Last came in ${relDay(lr.at)}` : '<span style="color:var(--peach)">Not seen yet</span>';
     const nd = nextDue(s), aw = awayIds.get(s.id);
-    return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
+    return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${s.absentOn && s.nextAt && nextDue(s) && ymd(nextDue(s)) === s.nextAt ? `<span class="ob" style="--c:var(--yellow)">Absent ${s.absentOn === ymd(new Date()) ? 'today' : fmtDateShort(parseD(s.absentOn))}</span> ` : ''}${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
   };
   const doneRow = s => {
     const c = lastCall(s.id, x => x.outcome === 'reached') || lastCall(s.id);
@@ -1866,6 +1869,7 @@ function renderMentor() {
     const row = e.target.closest('[data-sid]'), sid = row ? +row.dataset.sid : null;
     const qb = e.target.closest('[data-q]');
     if (qb && sid) { if (isCur) return quickLog(sid, qb.dataset.q); return openLog({ sid, preset: { outcome: qb.dataset.q, at: ymd(ws) + 'T12:00' } }); }
+    if (e.target.closest('[data-absent]') && sid) return markAbsent(sid);
     if (e.target.closest('[data-mlog]') && sid) return openLog({ sid, preset: isCur ? {} : { at: ymd(ws) + 'T12:00' } });
     if (e.target.closest('[data-mstu]') && sid) return openStudent(stuById(sid));
     const crow = e.target.closest('[data-cid]'), cid = crow ? +crow.dataset.cid : null;
@@ -2026,6 +2030,17 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
   $('#modal [data-del]')?.addEventListener('click', () => { closeModal(); deleteCall(call.id); });
 }
 
+/* ---------- absent today: move them to the next school day, without counting it as a no-show ---------- */
+async function markAbsent(sid) {
+  const s = stuById(sid); if (!s) return;
+  const prev = { nextAt: s.nextAt || '', nextSet: s.nextSet || '', absentOn: s.absentOn || '' };
+  const nd = nextOpenDay(new Date());
+  await api('PUT', 'students/' + sid, { ...s, nextAt: ymd(nd), nextSet: ymdhm(new Date()), absentOn: ymd(new Date()) });
+  await reload();
+  toast(`${s.name} is absent today · moved to ${fmtDateShort(nd)}`, { duration: 8000, undo: async () => { await api('PUT', 'students/' + sid, { ...stuById(sid), ...prev }); reload(); } });
+}
+const absentToday = s => s.absentOn === ymd(new Date());
+
 /* ---------- clicking a "Next:" label on the calendar: who they are, in plain text, and Came in / Didn't ---------- */
 function openDueCard(s, day) {
   if (!s) return;
@@ -2037,15 +2052,17 @@ function openDueCard(s, day) {
     [s.grade ? s.grade + 'th grade' : '', s.idnum ? 'ID ' + s.idnum : ''].filter(Boolean).join(' · '),
     ...lines,
     lr ? `Last came in ${fmtDateShort(parseD(lr.at))}` : 'Hasn\'t come in yet',
+    absentToday(s) ? 'Absent today' : '',
     d ? `Scheduled ${fmtDateShort(d)}${s.nextAt ? ' (rescheduled)' : ''}` : '',
     s.notes ? 'Note: ' + s.notes : '',
   ].filter(Boolean);
   openModal(`<div class="m-head"><h2>${esc(s.name)}</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body due-card">${info.map(t => `<div>${esc(t)}</div>`).join('')}</div>
-  <div class="m-foot">${IS_ADMIN ? '<button class="btn primary" data-x>Close</button>' : `<button class="btn" data-dno>Didn't come in</button><button class="btn primary" data-dyes>Came in</button>`}</div>`, 'sm');
+  <div class="m-foot">${IS_ADMIN ? '<button class="btn primary" data-x>Close</button>' : `<button class="btn left" data-dabs title="Absent from school today: move to the next school day">Absent today</button><button class="btn" data-dno>Didn't come in</button><button class="btn primary" data-dyes>Came in</button>`}</div>`, 'sm');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   $('#modal [data-dyes]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'reached'); });
   $('#modal [data-dno]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'no-show'); });
+  $('#modal [data-dabs]')?.addEventListener('click', () => { closeModal(); markAbsent(s.id); });
 }
 
 /* ---------- a student didn't come in, so another student who's due this week came instead ---------- */
@@ -3495,6 +3512,28 @@ async function reseedTeam() {
   SY.seen?.clear(); SY.annSig = null; SY.planLoaded = new Set(); SY.planners = null; _mOwn = { key: null, val: null };
   await reload(); await syncNow(true); await reload();
 }
+
+/* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
+const BUILD_ID = '20261118221415';
+const UPD = { shown: false, last: 0 };
+async function checkForUpdate() {
+  if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
+  UPD.last = Date.now();
+  let t = '';
+  try { t = await (await fetch(location.pathname + '?check=' + Date.now(), { cache: 'no-store' })).text(); } catch { return; }
+  const m = t.match(/const BUILD_ID = '([^']+)'/);
+  if (!m || m[1] === BUILD_ID || m[1] === '__BUILD_ID__') return;
+  UPD.shown = true;
+  const bar = document.createElement('div');
+  bar.className = 'upd-bar'; bar.setAttribute('role', 'status');
+  bar.innerHTML = `<span>A new version of the calendar is ready.</span><button class="btn primary" id="upd_go">Refresh</button><button class="linkbtn" id="upd_later">Later</button>`;
+  document.body.appendChild(bar);
+  $('#upd_go').onclick = () => { try { if (typeof syncNow === 'function') syncNow(true); } catch { /* best effort */ } setTimeout(() => location.replace(location.pathname + '?v=' + m[1] + location.hash), 300); };
+  $('#upd_later').onclick = () => { bar.remove(); setTimeout(() => { UPD.shown = false; }, 30 * 60000); };
+}
+setTimeout(checkForUpdate, 20000);
+setInterval(checkForUpdate, 5 * 60000);
+addEventListener('focus', () => checkForUpdate());
 
 function applyData(d) {
   S.user = d.user; S.settings = d.settings; S.calendars = d.calendars; S.events = d.events; S.tasks = d.tasks; S.mentor = d.mentor;
