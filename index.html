@@ -769,8 +769,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 let STORAGE_OK = true;
 
 const nextFriday = () => { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + (5 - t.getDay() + 7) % 7)); };
-const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 40, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
+const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix2: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
 function gradeFix(st) {
+  if (!st.goalFix2) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix2 = true; }   // IYT goal: 10 students in a day
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
   return st;
 }
@@ -1402,7 +1403,7 @@ const OUT = {
 };
 const METHODS = { 'in-person': 'Pulled from class' };
 const CONTACTS = { student: 'Student' };
-const MDEF = { dailyGoal: 10, weeklyGoal: 40, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
+const MDEF = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
 
 const IS_ADMIN = !!window.YES_ADMIN;
 const Mall = () => S.mentor || { students: [], calls: [], grades: [], settings: {} };
