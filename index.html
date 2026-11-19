@@ -1084,6 +1084,7 @@ async function api(method, path, body = {}) {
   }
   if (res === 'mentor-settings' && method === 'PUT') {
     const st = DB.mentor.settings;
+    if ('goalCustom' in body) st.goalCustom = !!body.goalCustom;
     if ('dailyGoal' in body) st.dailyGoal = Math.max(0, Math.min(999, Math.round(+body.dailyGoal || 0)));
     if ('weeklyGoal' in body) st.weeklyGoal = Math.max(0, Math.min(9999, Math.round(+body.weeklyGoal || 0)));
     if ('countMode' in body) st.countMode = body.countMode === 'reached' ? 'reached' : 'attempts';
@@ -1481,7 +1482,26 @@ function otherMentors() {
   const me = myMentor().trim().toLowerCase().split(/\s+/)[0];
   return [...new Set(Mall().students.filter(s => !s.src && s.mentor && s.mentor.trim().toLowerCase().split(/\s+/)[0] !== me).map(s => s.mentor.trim()))].sort();
 }
-const mset = () => ({ ...MDEF, ...M().settings });
+// pull-out goals per mentor (Daisy: 10 students a day). Mentors not listed have no goal, unless they set one under Goals.
+const TEAM_GOALS = { daisy: { dailyGoal: 10, weeklyGoal: 50 } };
+function teamGoal(who) {
+  const f = x => String(x || '').trim().toLowerCase().split(/\s+/)[0];
+  if (who) return TEAM_GOALS[f(who)] || { dailyGoal: 0, weeklyGoal: 0 };
+  // admin looking at everyone: add up the mentors' goals
+  let d = 0, w = 0; for (const n of (typeof teamNamesAll === 'function' ? teamNamesAll() : [])) { const g = TEAM_GOALS[f(n)]; if (g) { d += g.dailyGoal; w += g.weeklyGoal; } }
+  return { dailyGoal: d, weeklyGoal: w };
+}
+const mset = () => {
+  const st = { ...MDEF, ...M().settings };
+  if (!st.goalCustom) {
+    let who = '';
+    try { who = IS_ADMIN ? (S.mmentor || '') : myMentor(); } catch { who = ''; }
+    // helping someone (Abel with Daisy's students): their goal comes along
+    if (!IS_ADMIN && typeof helpView === 'function' && helpView() && !TEAM_GOALS[String(who).toLowerCase().split(/\s+/)[0]]) who = helpView();
+    Object.assign(st, teamGoal(who));
+  }
+  return st;
+};
 const countsGoal = c => mset().countMode === 'reached' ? c.outcome === 'reached' : true;
 const countsDone = c => mset().doneMode === 'any' ? true : c.outcome === 'reached';
 const callsOn = d => M().calls.filter(c => c.at.slice(0, 10) === ymd(d));
@@ -1619,6 +1639,7 @@ function dayHeaderNote(d, busy) {
 function renderMentor() {
   const ws = startOfWeek(S.cursor), we = addDays(ws, 6), today = startOfDay(new Date());
   const isCur = today >= ws && today <= we, st = goalsFor(ws);
+  const hasGoal = +mset().dailyGoal > 0 || +mset().weeklyGoal > 0;
   const weekClosures = closures().filter(c => c.start <= ymd(we) && c.end >= ymd(ws));
   const week = callsIn(ws, we), weekGoalN = week.filter(countsGoal).length;
   const todayN = callsOn(today).filter(countsGoal).length;
@@ -1676,13 +1697,13 @@ function renderMentor() {
     ${weekClosures.map(c => `<div class="m-closed"><b>IYT room closed</b> ${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}. No pull-outs those days; anyone due then moves to the next open day.</div>`).join('')}
     ${IS_ADMIN ? teamCard(ws, we) : ''}
     <div class="m-stats">
-      <div class="m-stat">${ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)')}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span></div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
-      <div class="m-stat">${ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)')}<div><div class="lbl">This week</div><div class="big">${weekGoalN}<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span></div><div class="muted sm">${!st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more ${st.countMode === 'reached' ? 'came in' : 'check-ins'}`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
+      <div class="m-stat">${hasGoal ? ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)') : ''}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span>` : ''}</div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : !hasGoal ? 'came in today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
+      <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more ${st.countMode === 'reached' ? 'came in' : 'check-ins'}`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
       <div class="m-stat">${ring(doneAll.length, active.length, 'var(--green)')}<div><div class="lbl">Up to date</div><div class="big">${doneAll.length}<span class="muted" style="font-size:15px"> / ${active.length}</span></div><div class="muted sm">${active.length - doneAll.length} due this week</div></div></div>
       <div class="m-stat ${isCur && gLeft <= 1 ? 'g-soon' : ''}"><div><div class="lbl">Grade check-ins due</div><div class="big">${DAYS[gDue.getDay()]} ${MONTHS_S[gDue.getMonth()]} ${gDue.getDate()}</div><div class="muted sm">${isCur ? (gLeft === 0 ? 'today' : gLeft === 1 ? 'tomorrow' : 'in ' + gLeft + ' days') : ''} · every ${+mset().gradeEvery || 14} days</div>${mset().gradeLast ? `<div class="muted sm">Last done ${fmtDateShort(parseD(mset().gradeLast))}</div>` : ''}${isCur ? '<button class="btn sm" id="gDoneBtn" style="margin-top:4px">I did them</button>' : ''}</div></div>
-      <div class="m-stat"><div><div class="lbl">Goal streak</div><div class="big">${streak()}<span class="muted" style="font-size:15px"> day${streak() === 1 ? '' : 's'}</span></div><div class="muted sm">days in a row hitting the daily goal</div></div></div>
+      ${!hasGoal ? '' : ''}<div class="m-stat" ${hasGoal ? '' : 'hidden'}><div><div class="lbl">Goal streak</div><div class="big">${streak()}<span class="muted" style="font-size:15px"> day${streak() === 1 ? '' : 's'}</span></div><div class="muted sm">days in a row hitting the daily goal</div></div></div>
     </div>
-    <div class="m-week"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Check-ins per day</b><span class="muted sm">goal: ${st.dailyGoal}/day</span></div>
+    <div class="m-week"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Check-ins per day</b><span class="muted sm">${hasGoal ? `goal: ${st.dailyGoal}/day` : ''}</span></div>
       <div class="m-days">${st.dailyGoal ? `<div class="goal-line" style="bottom:calc(${st.dailyGoal / maxDay * 100}% * 0.78 + 22px)"></div>` : ''}${days.map((d, i) => { const v = perDay[i]; return `<div class="m-day ${v >= st.dailyGoal && v ? 'met' : v ? 'part' : ''} ${sameDay(d, today) ? 'today' : ''}" title="${fmtDateShort(d)}: ${v}"><span>${v || ''}</span><div class="b" style="height:${v / maxDay * 78}%"></div><span>${closedOn(d) ? 'closed' : DAYS[d.getDay()] + ' ' + d.getDate()}</span></div>`; }).join('')}</div></div>
     ${away.length && M().students.length ? `<div class="m-away"><div class="row" style="justify-content:space-between;align-items:baseline"><b>Haven't come in for 2+ weeks <span class="muted">(${away.length})</span></b><span class="muted sm">school days only · closed weeks don't count</span></div>
       <div class="away-chips">${away.map(x => `<button class="away-chip" data-sid="${x.s.id}" data-mstu title="${esc(awayTitle(x))}">${esc(x.s.name)}${IS_ADMIN && !S.mmentor && x.s.mentor ? ` <span class="muted">· ${esc(x.s.mentor)}</span>` : ''} <span class="aw">${awayText(x)}</span></button>`).join('')}</div></div>` : ''}
@@ -1755,7 +1776,7 @@ function renderMentorCard() {
   for (const c of w) { if (!byS.has(c.student_id)) byS.set(c.student_id, []); byS.get(c.student_id).push(c); }
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
   const awayN = awayList(M().students, M().calls).length;
-  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}/${st.dailyGoal}</b></span><span>Week <b>${w.filter(countsGoal).length}/${st.weeklyGoal}</b></span></div><div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div><div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
+  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}${+mset().dailyGoal ? '/' + st.dailyGoal : ''}</b></span><span>Week <b>${w.filter(countsGoal).length}${+mset().weeklyGoal ? '/' + st.weeklyGoal : ''}</b></span></div>${+mset().dailyGoal ? `<div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div>` : ''}<div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
   if (!IS_ADMIN) el.insertAdjacentHTML('beforeend', quickBar('side', true));
   el.onclick = e => { if (e.target.closest('[data-qbar]')) return; closeSidebar(); setView('mentor'); };
 }
@@ -2125,7 +2146,8 @@ function openGoals() {
   $('#g_cadd').onclick = () => { const a = $('#g_cs').value, b2 = $('#g_ce').value || a; if (!a) return toast('Pick a start date'); cl.push({ start: a <= b2 ? a : b2, end: a <= b2 ? b2 : a, label: $('#g_cn').value.trim() }); $('#g_cs').value = $('#g_ce').value = $('#g_cn').value = ''; drawCl(); };
   $('#g_auto').onclick = () => { $('#g_w').value = (+$('#g_d').value || 0) * 5; };
   $('#modal [data-save]').onclick = async () => {
-    await api('PUT', 'mentor-settings', { dailyGoal: Math.max(0, +$('#g_d').value || 0), weeklyGoal: Math.max(0, +$('#g_w').value || 0), countMode: $('#g_c').value, doneMode: $('#g_done').value, everyDays: Math.max(1, +$('#g_every').value || 14), gradeEvery: Math.max(1, +$('#g_gevery').value || 14), gradeAnchor: $('#g_ganchor').value || '', closures: cl });
+    const gd = Math.max(0, +$('#g_d').value || 0), gw = Math.max(0, +$('#g_w').value || 0);
+    await api('PUT', 'mentor-settings', { goalCustom: st.goalCustom || gd !== +st.dailyGoal || gw !== +st.weeklyGoal, dailyGoal: gd, weeklyGoal: gw, countMode: $('#g_c').value, doneMode: $('#g_done').value, everyDays: Math.max(1, +$('#g_every').value || 14), gradeEvery: Math.max(1, +$('#g_gevery').value || 14), gradeAnchor: $('#g_ganchor').value || '', closures: cl });
     closeModal(); await reload(); toast('Goals saved');
   };
 }
