@@ -518,6 +518,7 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 
 .g-ok{margin-top:6px;display:inline-flex;align-items:center;gap:8px;padding:3px 10px;border-radius:999px;background:color-mix(in srgb,var(--green) 18%,transparent);color:var(--green);font-weight:700;font-size:13px}
 .g-ok .linkbtn{font-weight:400}
+.ms-info .next-pull{color:var(--sub)}.ms-info .next-pull .np{color:var(--text);font-weight:600}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1675,6 +1676,8 @@ const avColor = n => COLORS[[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % CO
 // cells starting with = + - @ would run as formulas when the file is opened in Excel/Sheets: make them plain text
 const csvCell = v => { v = String(v ?? ''); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
 const telHref = p => 'tel:' + String(p).replace(/[^\d+]/g, '');
+// "today", "yesterday", or the full date (Mon, Nov 16): never a bare weekday, so it can't be read as a future day
+function fullDay(dateStr) { const d = parseD(dateStr), diff = dayDiff(d, new Date()); return diff === 0 ? 'today' : diff === 1 ? 'yesterday' : fmtDateShort(d); }
 function relDay(dateStr) {
   const d = parseD(dateStr), diff = dayDiff(d, new Date());
   return diff === 0 ? 'today' : diff === 1 ? 'yesterday' : diff < 7 && diff > 0 ? DAYS_L[d.getDay()] : fmtDateShort(d);
@@ -1840,13 +1843,13 @@ function renderMentor() {
     const lt = tries[tries.length - 1];
     const sub = tries.length
       ? `${tries.length} pull-out${tries.length > 1 ? 's' : ''} this week · last <span class="ob" style="--c:${OUT[lt.outcome]?.c}">${OUT[lt.outcome]?.l}</span> ${relDay(lt.at)}`
-      : lr ? `Last came in ${relDay(lr.at)}` : '<span style="color:var(--peach)">Not seen yet</span>';
+      : lr ? `Last came in ${fullDay(lr.at)}` : '<span style="color:var(--peach)">Not seen yet</span>';
     const nd = nextDue(s), aw = awayIds.get(s.id);
     return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}${s.absentOn && s.nextAt && nextDue(s) && ymd(nextDue(s)) === s.nextAt ? `<span class="ob" style="--c:var(--yellow)">Absent ${s.absentOn === ymd(new Date()) ? 'today' : fmtDateShort(parseD(s.absentOn))}</span> ` : ''}${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
   };
   const doneRow = s => {
     const c = lastCall(s.id, x => x.outcome === 'reached') || lastCall(s.id);
-    return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}<span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span> ${relDay(c.at)} ${fmtTime(parseD(c.at))} · ${dueSpan(nextDue(s))}</div></div>${IS_ADMIN ? '' : '<div class="ms-acts"><button data-mlog title="Log another check-in">Log</button></div>'}</div>`;
+    return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}<span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span> ${fullDay(c.at)}, ${fmtTime(parseD(c.at))}${nextDue(s) ? ` <span class="muted">·</span> <span class="next-pull">Next pull-out: <span class="np">${fmtDateShort(nextDue(s))}</span></span>` : ''}</div></div>${IS_ADMIN ? '' : '<div class="ms-acts"><button data-mlog title="Log another check-in">Log</button></div>'}</div>`;
   };
   const days = [...Array(7)].map((_, i) => addDays(ws, i));
   const perDay = days.map(d => callsOn(d).filter(countsGoal).length);
@@ -3967,7 +3970,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119151434';
+const BUILD_ID = '20261119154648';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
