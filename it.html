@@ -482,6 +482,7 @@ td.cv-closed,.cv-key i.cv-closed,.cv-tbl thead th.cv-closed{background:repeating
 .sw-pick:hover{border-color:var(--accent)}
 .sw-pick.on{border-color:var(--green);background:color-mix(in srgb,var(--green) 18%,var(--base))}
 .ms-acts button[data-mswap]{width:auto;padding:0 8px;font-size:12px}
+.due-card{gap:3px!important;font-size:14px;line-height:1.45}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1420,7 +1421,7 @@ function checkinOccs(rs, re) {
     if (s.active === false) continue;
     const d = nextDue(s); if (!d || d <= today || d < rs || d >= end) continue;
     const ev = {
-      id: 'due-' + s.id, dueFor: s.id, checkin: true, title: `Next: ${s.name}${s.nextAt && s.nextAt === ymd(d) ? ' (rescheduled)' : ''}`,
+      id: 'due-' + s.id, dueFor: s.id, checkin: true, title: s.name,
       all_day: true, calendar_id: null, start: ymd(d), end: ymd(d), color: S.settings.ciNext || '#cdd6f4',
       rrule: null, exdates: [], reminders: [], checklist: [], location: '', description: '', status: 'free', starred: false,
     };
@@ -1892,6 +1893,28 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
   $('#modal [data-save]').onclick = save;
   $('#modal').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } };
   $('#modal [data-del]')?.addEventListener('click', () => { closeModal(); deleteCall(call.id); });
+}
+
+/* ---------- clicking a "Next:" label on the calendar: who they are, in plain text, and Came in / Didn't ---------- */
+function openDueCard(s, day) {
+  if (!s) return;
+  const sp = v => String(v || '').split(/\s*[\/|]\s*/).map(x => x.trim()).filter(Boolean);
+  const per = sp(s.period), cls = sp(s.classes), rm = sp(s.room), tc = sp(s.teacher);
+  const lines = per.length ? per.map((p, i) => `${p}${/^\d$/.test(p) ? ({ 1: 'st', 2: 'nd', 3: 'rd' }[p] || 'th') : ''} period${cls[i] ? ' · ' + cls[i] : ''}${rm[i] ? ' · room ' + rm[i] : ''}${tc[i] ? ' · ' + tc[i] : ''}`) : (cls.length ? [cls.join(', ')] : []);
+  const lr = lastCall(s.id, c => c.outcome === 'reached'), d = nextDue(s);
+  const info = [
+    [s.grade ? s.grade + 'th grade' : '', s.idnum ? 'ID ' + s.idnum : ''].filter(Boolean).join(' · '),
+    ...lines,
+    lr ? `Last came in ${fmtDateShort(parseD(lr.at))}` : 'Hasn\'t come in yet',
+    d ? `Scheduled ${fmtDateShort(d)}${s.nextAt ? ' (rescheduled)' : ''}` : '',
+    s.notes ? 'Note: ' + s.notes : '',
+  ].filter(Boolean);
+  openModal(`<div class="m-head"><h2>${esc(s.name)}</h2><button class="iconbtn" data-x>✕</button></div>
+  <div class="m-body due-card">${info.map(t => `<div>${esc(t)}</div>`).join('')}</div>
+  <div class="m-foot">${IS_ADMIN ? '<button class="btn primary" data-x>Close</button>' : `<button class="btn" data-dno>Didn't come in</button><button class="btn primary" data-dyes>Came in</button>`}</div>`, 'sm');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  $('#modal [data-dyes]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'reached'); });
+  $('#modal [data-dno]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'no-show'); });
 }
 
 /* ---------- a student didn't come in, so another student who's due this week came instead ---------- */
@@ -3904,7 +3927,7 @@ const CALL_RE = /https?:\/\/[^\s<>"]*(zoom\.us|meet\.google\.com|teams\.microsof
 function showPopover(o, anchor) {
   if (!o) return;
   if (o.ev.closedRange) { S.cursor = startOfDay(o.start); return setView('mentor'); }
-  if (o.ev.dueFor) return openStudent(stuById(o.ev.dueFor));
+  if (o.ev.dueFor) return openDueCard(stuById(o.ev.dueFor), o.start);
   if (o.ev.gradeDue) { S.cursor = parseD(o.ev.gradeDue); return setView('mentor'); }
   if (o.ev.checkin) { const c = M().calls.find(x => x.id === o.ev.callId); if (c) openLog({ call: c }); return; }
   const ev = o.ev, cal = calById(ev.calendar_id), p = $('#popover');
