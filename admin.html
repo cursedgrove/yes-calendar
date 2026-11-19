@@ -638,7 +638,6 @@ html,body{font-size:13px}
     </div>
     <div class="seg" id="viewSeg">
       <button data-view="day" title="Day (D)">Day</button>
-      <button data-view="4day" title="4 days (X)">4 Day</button>
       <button data-view="week" title="Week (W)">Week</button>
       <button data-view="month" title="Month (M)">Month</button>
       <button data-view="year" title="Year (Y)">Year</button>
@@ -3525,7 +3524,7 @@ function showAuth(st = {}) {
 async function boot() {
   applyData(await api('GET', 'bootstrap'));
   $('#auth').hidden = true; $('#app').hidden = false;
-  if (!['day', '4day', 'week', 'month', 'year', 'agenda', 'mentor'].includes(S.view)) S.view = 'week';
+  if (!['day', 'week', 'month', 'year', 'agenda', 'mentor'].includes(S.view)) S.view = 'week';
   applyTheme();
   if (!S.booted) { S.booted = true; bindOnce(); }
   render();
@@ -4744,7 +4743,7 @@ function bindOnce() {
     if (e.key.toLowerCase() === 'e' && S.popOcc && !S.popOcc.ev.holiday) { e.preventDefault(); openEditor({ occ: S.popOcc }); return; }
     const map = {
       t: goToday, j: () => shift(1), n: () => shift(1), arrowright: () => shift(1), k: () => shift(-1), p: () => shift(-1), arrowleft: () => shift(-1),
-      d: () => setView('day'), x: () => setView('4day'), w: () => setView('week'), m: () => setView('month'), y: () => setView('year'), a: () => setView('agenda'),
+      d: () => setView('day'), w: () => setView('week'), m: () => setView('month'), y: () => setView('year'), a: () => setView('agenda'),
       c: () => openEditor(), q: () => { $('#app').classList.add('sb-open'); $('#quickInput').focus(); }, '/': () => si.focus(), '?': showShortcuts,
       i: () => showInsights(), s: () => openSettings(), o: () => setView('mentor'), g: jumpPicker,
     };
