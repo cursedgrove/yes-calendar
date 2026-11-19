@@ -509,6 +509,9 @@ html[data-season]:not([data-season=""]) .search input{background:#fff;color:#222
 html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text)}
 /* new version banner */
 .upd-bar{position:fixed;left:50%;top:52px;transform:translateX(-50%);z-index:90;display:flex;align-items:center;gap:10px;background:var(--base);color:var(--text);border:1px solid var(--accent);border-radius:12px;padding:8px 10px 8px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:14px}
+/* admin note on a student */
+.note-box{background:color-mix(in srgb,var(--yellow) 16%,var(--base));border:1px solid color-mix(in srgb,var(--yellow) 55%,var(--s0));border-radius:10px;padding:8px 10px;margin-bottom:6px;display:flex;flex-direction:column;gap:2px}
+.note-b{cursor:help}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1781,11 +1784,11 @@ function renderMentor() {
       ? `${tries.length} pull-out${tries.length > 1 ? 's' : ''} this week · last <span class="ob" style="--c:${OUT[lt.outcome]?.c}">${OUT[lt.outcome]?.l}</span> ${relDay(lt.at)}`
       : lr ? `Last came in ${relDay(lr.at)}` : '<span style="color:var(--peach)">Not seen yet</span>';
     const nd = nextDue(s), aw = awayIds.get(s.id);
-    return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${s.absentOn && s.nextAt && nextDue(s) && ymd(nextDue(s)) === s.nextAt ? `<span class="ob" style="--c:var(--yellow)">Absent ${s.absentOn === ymd(new Date()) ? 'today' : fmtDateShort(parseD(s.absentOn))}</span> ` : ''}${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
+    return `<div class="ms-row${aw ? ' away' : ''}" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.grade ? ` <span class="muted sm">· ${esc(s.grade)}th</span>` : ''}${s.idnum ? ` <span class="muted sm">· #${esc(s.idnum)}</span>` : ''}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}${s.absentOn && s.nextAt && nextDue(s) && ymd(nextDue(s)) === s.nextAt ? `<span class="ob" style="--c:var(--yellow)">Absent ${s.absentOn === ymd(new Date()) ? 'today' : fmtDateShort(parseD(s.absentOn))}</span> ` : ''}${aw && aw.at ? `<span class="ob away-b" style="--c:var(--red)" title="${esc(awayTitle(aw))}">Not seen in ${awayText(aw)}</span> ` : ''}${sub}${nd ? ' · ' + dueSpan(nd) : ''}</div>${pullInfo(s) ? `<div class="pull">${esc(pullInfo(s))}</div>` : ''}<div>${phoneLinks(s)}</div></div>${acts(s)}</div>`;
   };
   const doneRow = s => {
     const c = lastCall(s.id, x => x.outcome === 'reached') || lastCall(s.id);
-    return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span> ${relDay(c.at)} ${fmtTime(parseD(c.at))} · ${dueSpan(nextDue(s))}</div></div>${IS_ADMIN ? '' : '<div class="ms-acts"><button data-mlog title="Log another check-in">Log</button></div>'}</div>`;
+    return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}<span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span> ${relDay(c.at)} ${fmtTime(parseD(c.at))} · ${dueSpan(nextDue(s))}</div></div>${IS_ADMIN ? '' : '<div class="ms-acts"><button data-mlog title="Log another check-in">Log</button></div>'}</div>`;
   };
   const days = [...Array(7)].map((_, i) => addDays(ws, i));
   const perDay = days.map(d => callsOn(d).filter(countsGoal).length);
@@ -1853,7 +1856,7 @@ function renderMentor() {
     if (qb && sid) { if (isCur) return quickLog(sid, qb.dataset.q); return openLog({ sid, preset: { outcome: qb.dataset.q, at: ymd(ws) + 'T12:00' } }); }
     if (e.target.closest('[data-absent]') && sid) return markAbsent(sid);
     if (e.target.closest('[data-mlog]') && sid) return openLog({ sid, preset: isCur ? {} : { at: ymd(ws) + 'T12:00' } });
-    if (e.target.closest('[data-mstu]') && sid) return openStudent(stuById(sid));
+    if (e.target.closest('[data-mstu]') && sid) return IS_ADMIN ? openDueCard(stuById(sid)) : openStudent(stuById(sid));
     const crow = e.target.closest('[data-cid]'), cid = crow ? +crow.dataset.cid : null;
     if (cid && e.target.closest('[data-mdel]')) return deleteCall(cid);
     if (cid && e.target.closest('[data-mswap]')) return openSwap(M().calls.find(c => c.id === cid));
@@ -2038,13 +2041,24 @@ function openDueCard(s, day) {
     d ? `Scheduled ${fmtDateShort(d)}${s.nextAt ? ' (rescheduled)' : ''}` : '',
     s.notes ? 'Note: ' + s.notes : '',
   ].filter(Boolean);
+  const an = adminNote(s);
   openModal(`<div class="m-head"><h2>${esc(s.name)}</h2><button class="iconbtn" data-x>✕</button></div>
-  <div class="m-body due-card">${info.map(t => `<div>${esc(t)}</div>`).join('')}</div>
+  <div class="m-body due-card">${!IS_ADMIN && an ? `<div class="note-box"><b>Note from your admin</b><div>${esc(an.note)}</div><span class="muted sm">${esc(syncWhen(an.updated))}</span></div>` : ''}${info.map(t => `<div>${esc(t)}</div>`).join('')}
+  ${IS_ADMIN ? `<label class="field" style="margin-top:8px"><span>Note for ${esc(s.mentor || 'their mentor')} (shows on this student for them)</span><textarea id="an_note" rows="3" maxlength="1000" placeholder="e.g. Talk to him about attendance">${esc(an ? an.note : '')}</textarea></label>
+  <div class="row" style="gap:6px">${an ? '<button class="btn" data-nrm>Remove note</button>' : ''}<button class="btn primary" data-nsave>${an ? 'Update note' : 'Pin note'}</button><span class="muted sm" id="an_msg">${an ? 'Pinned ' + esc(syncWhen(an.updated)) : ''}</span></div>` : ''}</div>
   <div class="m-foot">${IS_ADMIN ? '<button class="btn primary" data-x>Close</button>' : `<button class="btn left" data-dabs title="Absent from school today: move to the next school day">Absent today</button><button class="btn" data-dno>Didn't come in</button><button class="btn primary" data-dyes>Came in</button>`}</div>`, 'sm');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   $('#modal [data-dyes]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'reached'); });
   $('#modal [data-dno]')?.addEventListener('click', () => { closeModal(); quickLog(s.id, 'no-show'); });
   $('#modal [data-dabs]')?.addEventListener('click', () => { closeModal(); markAbsent(s.id); });
+  const nsave = async text => {
+    if (!syncOn()) return toast('Sign in with the admin code first.');
+    $('#an_msg').textContent = 'Saving...';
+    try { await saveAdminNote(s, text); closeModal(); toast(text ? `Note pinned on ${s.name} for ${s.mentor || 'their mentor'}` : 'Note removed'); renderMentor(); }
+    catch (e) { $('#an_msg').textContent = e.message; }
+  };
+  $('#modal [data-nsave]')?.addEventListener('click', () => nsave($('#an_note').value.trim()));
+  $('#modal [data-nrm]')?.addEventListener('click', () => nsave(''));
 }
 
 /* ---------- a student didn't come in, so another student who's due this week came instead ---------- */
@@ -2104,8 +2118,10 @@ function openStudent(s) {
   s = s || { name: '', idnum: '', period: '', classes: '', room: '', teacher: '', phone: '', email: '', every: '', school: M().students.at(-1)?.school || '', grade: '', mentor: M().students.at(-1)?.mentor || '', notes: '', active: true, flagged: false };
   const hist = isNew ? [] : M().calls.filter(c => c.student_id === s.id).sort((a, b) => b.at.localeCompare(a.at));
   const reached = hist.filter(c => c.outcome === 'reached').length;
+  const an = isNew ? null : adminNote(s);
   openModal(`<div class="m-head"><h2>${isNew ? 'Add student' : esc(s.name)}</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
+    ${an ? `<div class="note-box"><b>Note from your admin</b><div>${esc(an.note)}</div><span class="muted sm">${esc(syncWhen(an.updated))}</span></div>` : ''}
     <div class="row"><label class="field" style="flex:2"><span>Name</span><input id="s_name" value="${esc(s.name)}" autofocus></label><label class="field" style="flex:1"><span>Grade</span><select id="s_grade"><option value=""></option>${['6', '7', '8', '9', '10', '11', '12'].map(g => `<option ${String(s.grade) === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label></div>
     <div class="row"><label class="field" style="flex:1"><span>Student ID</span><input id="s_idnum" value="${esc(s.idnum || '')}"></label><label class="field" style="flex:1"><span>Pull-out period(s)</span><input id="s_period" value="${esc(s.period || '')}" placeholder="ex: 3/6"></label></div>
     <label class="field"><span>Class(es) to pull from</span><input id="s_classes" value="${esc(s.classes || '')}" placeholder="ex: DSLR Photography / Guitar"></label>
@@ -3003,10 +3019,33 @@ function openSync() {
 }
 
 /* ======================================================================== events & reminders the admin sends out */
+/* admin notes pinned on students (for their mentor) */
+async function noteRefresh(c = syncCfg()) {
+  try {
+    const j = await syncCall({ action: 'note-get', name: c.name }, c);
+    const sig = JSON.stringify(j.notes || []);
+    if (sig === SY.noteSig) return;
+    const first = SY.noteSig == null; SY.noteSig = sig; SY.notes = j.notes || [];
+    store.set('yes.notes.' + LS_KEY, sig);
+    if ($('#modalWrap').hidden && $('#popover').hidden) render();
+    if (!first && c.role !== 'boss' && SY.notes.length) toast('Your admin pinned a note on a student. Look for the Note tag on the Mentoring tab.', { duration: 8000 });
+  } catch { /* script may be older: no notes */ }
+}
+function adminNote(s) {
+  if (!s) return null;
+  if (!SY.notes) { try { SY.notes = JSON.parse(store.get('yes.notes.' + LS_KEY) || '[]'); } catch { SY.notes = []; } }
+  const f = x => String(x || '').trim().toLowerCase(), m1 = x => f(x).split(/\s+/)[0];
+  return SY.notes.find(n => f(n.student) === f(s.name) && (!s.mentor || m1(n.mentor) === m1(s.mentor))) || SY.notes.find(n => f(n.student) === f(s.name)) || null;
+}
+async function saveAdminNote(s, text) {
+  await syncCall({ action: 'note-put', mentor: s.mentor || '', student: s.name, note: text });
+  SY.noteSig = null; await noteRefresh();
+}
 async function annRefresh(c = syncCfg()) {
   const boss = c.role === 'boss';
   const j = await syncCall(boss ? { action: 'ann-list' } : { action: 'ann-get', name: c.name }, c);
   SY.ann = j.items || [];
+  noteRefresh(c);
   const sig = JSON.stringify(SY.ann);
   if (sig === SY.annSig) return;
   SY.annSig = sig;
@@ -3496,7 +3535,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261118221415';
+const BUILD_ID = '20261118225556';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
