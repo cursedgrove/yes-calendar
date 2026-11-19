@@ -3145,7 +3145,9 @@ function liveCheckins(tabs, localNames) {
     const theirs = new Set(roster.filter(s => s.mentor && s.mentor.toLowerCase() !== tab.name.toLowerCase()).map(s => plNorm(s.name)));   // "Isabel's" students on Daisy's tab
     const rosterLocal = new Map();
     for (const s of roster) { if (theirs.has(plNorm(s.name))) continue; const l = toLocal(s.name); if (l) rosterLocal.set(plNorm(s.name), l); else newStu.push({ ...s, mentor: tab.name }); }
-    const names = [...new Set(localNames.concat(roster.map(s => s.name)))];
+    // one spelling per student: the calendar's own when the roster's matches it, so the two don't cancel each other out
+    const seenN = new Set(localNames.map(plNorm)), names = localNames.slice();
+    for (const s of roster) { const k = plNorm(s.name); if (seenN.has(k) || rosterLocal.has(k)) continue; seenN.add(k); names.push(s.name); }
     for (const ck of planCheckins(a.lines, names).checkins) {
       if (ck.unknown || theirs.has(plNorm(ck.name))) continue;
       const name = rosterLocal.get(plNorm(ck.name)) || toLocal(ck.name) || ck.name;
@@ -3301,7 +3303,7 @@ async function mentorSync(c) {
  * Every few minutes: read this mentor's "<Name> - Davis" tab (and the tab of whoever they help), turn it into
  * pull-outs with the same reader as Import planner, then add / change / remove pull-outs here.
  * The normal sync then shares them with the mentor's other devices and the admin. */
-const LIVE_EVERY = 4 * 60000, LIVE_ON = false;
+const LIVE_EVERY = 4 * 60000, LIVE_ON = true;
 async function plannerLiveSync(c, force = false, dry = false) {
   if (!force && Date.now() - (SY.liveAt || 0) < LIVE_EVERY) return false;
   if (!dry) SY.liveAt = Date.now();
@@ -3958,7 +3960,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119145035';
+const BUILD_ID = '20261119145600';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
