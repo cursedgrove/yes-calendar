@@ -2861,7 +2861,8 @@ function analyzeXlsx(sheets) {
     let rosterCols = null;
     const first = all.find(c => /^first( name)?$/i.test(c.text.trim()) && all.some(d => d.row === c.row && /^last( name)?$/i.test(d.text.trim())));
     if (first && !out.rosterTSV) {
-      const hdr = all.filter(c => c.row === first.row && c.text.trim()).sort((a, b) => a.col - b.col);
+      // the roster's own headers (Comments, #, First, Last...): not a month banner like "AUGUST" that shares the row
+      const hdr = all.filter(c => c.row === first.row && c.col >= first.col - 2 && c.text.trim()).sort((a, b) => a.col - b.col);
       rosterCols = [hdr[0].col, hdr[hdr.length - 1].col];
       const rows = [hdr.map(h => h.text.trim())];
       let blanks = 0;
@@ -2879,12 +2880,16 @@ function analyzeXlsx(sheets) {
     for (const d of dateCells) { if (!byCol.has(d.col)) byCol.set(d.col, []); byCol.get(d.col).push(d); }
     for (const [col, ds] of byCol) {
       ds.sort((a, b) => a.row - b.row);
+      // a week whose date row is missing: the gap to the next date row is about two weeks tall, so the lower half is a week later
+      const gaps = ds.slice(1).map((d, i) => d.row - ds[i].row).sort((a, b) => a - b), H = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 11;
       ds.forEach((d, i) => {
         const date = plDate(d.text.match(PL_DATE) || d.text.replace(PL_WEEKDAY, ' ').match(PL_DATE)), end = i + 1 < ds.length ? ds[i + 1].row : d.row + 60;
+        const k = i + 1 < ds.length ? Math.max(1, Math.round((end - d.row) / H)) : 1, size = (end - d.row) / k;
+        const dateAt = r => { const w = Math.min(k - 1, Math.floor((r - d.row - 1) / size)); if (!w) return date; const t = new Date(date + 'T12:00'); t.setDate(t.getDate() + 7 * w); return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`; };
         for (let r = d.row + 1; r < end; r++) {
           const c = at(r, col); if (!c || !c.text.trim()) continue;
           if (/^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)$/i.test(c.text.trim())) break;
-          for (const part of c.text.split('\n')) if (part.trim()) out.lines.push({ date, text: part.trim(), color: c.color, x: col * 10, y: r * 10 + out.lines.length * 0.001 });
+          c.text.split('\n').forEach((part, i) => { if (part.trim()) out.lines.push({ date: dateAt(r), text: part.trim(), color: (c.lineColors && c.lineColors[i]) || c.color, x: col * 10, y: r * 10 + i + out.lines.length * 0.001 }); });
         }
       });
     }
@@ -3077,6 +3082,33 @@ function fixPeriod(p) { const m = String(p || '').match(/^(\d{1,2})\/(\d{1,2})\/
 // "CD_MENTOR_PLANNER_..._-_Isabel_-_Davis.pdf" -> "Isabel" (the planner's own Mentor box is often left as whoever made the template)
 function fileMentor(name) { const m = String(name).replace(/_/g, ' ').match(/\s-\s+([A-Z][a-z]+)\s+-\s+[^-]+\.(pdf|xlsx)$/i); return m ? m[1] : ''; }
 
+/* ---------- the job's planner Sheet, read live: cells from the team script -> the same shape as an .xlsx planner ---------- */
+const hexRgb = h => /^#[0-9a-f]{6}$/i.test(h || '') ? [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255) : null;
+// a name written in green or red text (several names in one cell): green = came in, red = didn't
+function textOutcomeColor(h) {
+  const c = hexRgb(h); if (!c) return null;
+  const [r, g, b] = c;
+  if (g > r + 0.08 && g >= b) return [0.42, 0.66, 0.31];
+  if (r > g + 0.15 && r > b) return [0.88, 0.4, 0.4];
+  return null;
+}
+function liveSheet(tab) {
+  const cells = new Map();
+  for (const [row, col, fill, text, parts] of tab.cells || []) {
+    const cell = { row, col, text: String(text).replace(/\r/g, ''), color: hexRgb(fill) };
+    if (parts) {   // color of each line = the colored text on it (most characters wins)
+      const lines = [new Map()];
+      for (const [t, h] of parts) {
+        const segs = String(t).split('\n');
+        segs.forEach((seg, i) => { if (i) lines.push(new Map()); const col2 = textOutcomeColor(h); if (col2 && seg.trim()) { const k = col2.join(); lines[lines.length - 1].set(k, (lines[lines.length - 1].get(k) || 0) + seg.trim().length); } });
+      }
+      cell.lineColors = lines.map(m => { const best = [...m].sort((a, b) => b[1] - a[1])[0]; return best ? best[0].split(',').map(Number) : null; });
+    }
+    cells.set(row + ',' + col, cell);
+  }
+  return { name: tab.name, cells };
+}
+
 /* ======================================================================== team sync through a shared Google Sheet */
 // Mentors: every change to your students or pull-outs is sent to the Sheet a few seconds later.
 // Boss: everyone's students and pull-outs are read from the Sheet every minute (and when you come back to the window).
@@ -3211,6 +3243,66 @@ async function mentorSync(c) {
     }
   }
 }
+/* ---------- the job's planner Sheet: when a name there turns green or red, the calendar follows ----------
+ * Every few minutes: read this mentor's "<Name> - Davis" tab (and the tab of whoever they help), turn it into
+ * pull-outs with the same reader as Import planner, then add / change / remove pull-outs here.
+ * The normal sync then shares them with the mentor's other devices and the admin. */
+const LIVE_EVERY = 4 * 60000, LIVE_ON = false;
+async function plannerLiveSync(c, force = false, dry = false) {
+  if (!force && Date.now() - (SY.liveAt || 0) < LIVE_EVERY) return false;
+  if (!dry) SY.liveAt = Date.now();
+  const plan = { newStudents: [], add: [], change: [], remove: [] };
+  let j;
+  try { j = await syncCall({ action: 'planner-live', name: c.name }, c); } catch (e) { if (/Unknown action|Only the admin|planner Sheet/.test(e.message)) return false; throw e; }
+  if (!j || !j.ok || !(j.tabs || []).length) return false;
+  const stateKey = 'yes.live.' + LS_KEY + '.' + String(c.name).toLowerCase();
+  let prev = null; try { prev = JSON.parse(store.get(stateKey) || 'null'); } catch { prev = null; }
+  const now = {}, newStu = [];
+  let changed = false;
+  const local = () => new Map(Mall().students.filter(s => !s.src).map(s => [plNorm(s.name), s]));
+  for (const tab of j.tabs) {
+    const a = analyzeXlsx([liveSheet(tab)]);
+    const roster = a.rosterTSV ? parseRoster(a.rosterTSV) : [];
+    for (const s of roster) { s.period = fixPeriod(s.period); const m = (s.notes || '').match(/^\s*([A-Z][a-z]+)['’]s\b\s*(?:·\s*)?(.*)$/); if (m) { s.mentor = m[1]; s.notes = m[2]; } }
+    const theirs = new Set(roster.filter(s => s.mentor && s.mentor.toLowerCase() !== tab.name.toLowerCase()).map(s => plNorm(s.name)));   // "Isabel's" students on Daisy's tab
+    const mine = roster.filter(s => !theirs.has(plNorm(s.name)));
+    const have = local();
+    for (const s of mine) if (!have.has(plNorm(s.name))) newStu.push({ ...s, mentor: tab.name });
+    const names = [...new Set([...have.values()].map(s => s.name).concat(roster.map(s => s.name)))];
+    for (const ck of planCheckins(a.lines, names).checkins) {
+      if (ck.unknown || theirs.has(plNorm(ck.name))) continue;
+      now[[plNorm(ck.name), ck.date, ck.period || ''].join('|')] = { name: ck.name, date: ck.date, period: ck.period || '', outcome: ck.outcome };
+    }
+  }
+  plan.newStudents = newStu.map(s => s.name);
+  if (newStu.length && !dry) { const r = await api('POST', 'students-import', { rows: newStu }); if (r.imported) { changed = true; await reload(); } }
+  const have = local(), add = [];
+  const dayCalls = (s, d) => Mall().calls.filter(x => x.student_id === s.id && x.at.startsWith(d));
+  const perDay = new Map(); for (const v of Object.values(now)) { const k = plNorm(v.name) + '|' + v.date; perDay.set(k, (perDay.get(k) || 0) + 1); }
+  for (const v of Object.values(now)) {
+    const s = have.get(plNorm(v.name)); if (!s) continue;
+    const at = `${v.date}T${PER_TIME[v.period] || '12:00'}`, calls = dayCalls(s, v.date);
+    const same = calls.find(x => x.at === at) || (calls.length === 1 && perDay.get(plNorm(v.name) + '|' + v.date) === 1 ? calls[0] : null);
+    if (same) { if (same.outcome !== v.outcome) { plan.change.push(`${s.name} ${same.at} ${same.outcome} -> ${v.outcome}`); if (!dry) { await api('PUT', 'calls/' + same.id, { ...same, outcome: v.outcome }); changed = true; } } }
+    else add.push({ name: s.name, at, outcome: v.outcome });
+  }
+  plan.add = add.map(x => `${x.name} ${x.at} ${x.outcome}`);
+  if (add.length && !dry) { const r = await api('POST', 'calls-import', { rows: add }); if (r.imported) changed = true; }
+  // taken off the planner (or the color cleared) since last time: take it off here too, unless the read looks broken
+  if (prev && Object.keys(now).length >= Object.keys(prev).length * 0.5) {
+    for (const [k, v] of Object.entries(prev)) {
+      if (now[k]) continue;
+      const s = have.get(plNorm(v.name)); if (!s) continue;
+      const calls = dayCalls(s, v.date), at = `${v.date}T${PER_TIME[v.period] || '12:00'}`;
+      const gone = calls.find(x => x.at === at && x.outcome === v.outcome) || (calls.length === 1 && calls[0].outcome === v.outcome && !Object.values(now).some(n => plNorm(n.name) === plNorm(v.name) && n.date === v.date) ? calls[0] : null);
+      if (gone) { plan.remove.push(`${s.name} ${gone.at} ${gone.outcome}`); if (!dry) { try { await api('DELETE', 'calls/' + gone.id); changed = true; } catch { /* already gone */ } } }
+    }
+  }
+  if (dry) return plan;
+  store.set(stateKey, JSON.stringify(now));
+  if (changed) { await reload(); if ($('#modalWrap').hidden) render(); }
+  return changed;
+}
 async function syncNow(quiet = true) {
   if (!syncOn() || SY.busy) return;
   const c = syncCfg();
@@ -3258,6 +3350,7 @@ async function syncNow(quiet = true) {
       else if (IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor();
       await annRefresh(c);
     } else {
+      if (LIVE_ON) try { await plannerLiveSync(c, !quiet); } catch (e) { console.warn('planner sheet', e.message); }
       await mentorSync(c);
       await annRefresh(c);
     }
@@ -3825,7 +3918,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119142652';
+const BUILD_ID = '20261119144642';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
