@@ -2,8 +2,8 @@
 <html lang="en" data-theme="mocha">
 <head>
 <meta charset="utf-8">
-  <meta name="robots" content="noindex, nofollow">
-  <meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Yes Calendar</title>
 <meta name="theme-color" content="#1e1e2e">
@@ -2430,7 +2430,7 @@ function planCheckins(lines, rosterNames) {
       let t = l.text.replace(PL_WEEKDAY, '').replace(/(\d)(st|nd|rd|th)?(?=[A-Z])/g, '$1$2 ').replace(/([a-z])(\d)/g, '$1 $2').trim();
       if (!t || PL_LABELS.test(t) || /^[A-Z\s]{4,}$/.test(t)) continue;
       const prev = merged[merged.length - 1];
-      const cont = prev && Math.abs(l.x - prev.x) < 25 && (/^[(a-z]/.test(t) || /^\d\s*(st|nd|rd|th)?\.?$/.test(t) || /^Sierra\b/.test(t) || prev.text.trim().endsWith('(') ||
+      const cont = prev && Math.abs(l.x - prev.x) < 25 && colorOutcome(l.color) === colorOutcome(prev.color) && (/^[(a-z]/.test(t) || /^\d\s*(st|nd|rd|th)?\.?$/.test(t) || /^Sierra\b/.test(t) || prev.text.trim().endsWith('(') ||
         (!/\d/.test(prev.text) && /^[A-Z][a-z]+( \d\w*)?$/.test(t) && !firstWords.has(plNorm(t).split(' ')[0])));
       if (cont) prev.text += ' ' + t; else merged.push({ ...l, text: t });
     }
@@ -2613,7 +2613,12 @@ async function syncNow(quiet = true) {
       else if (IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor();
       await annRefresh(c);
     } else {
-      await syncCall(syncPayload(c), c);
+      const pl = syncPayload(c);
+      // nothing on this computer yet (new computer, or a mentor who just switched in): don't wipe what's on the Sheet
+      if (pl.students.length || pl.calls.length || store.get('yes.pushed.' + LS_KEY) === String(c.name).toLowerCase()) {
+        await syncCall(pl, c);
+        if (pl.students.length) store.set('yes.pushed.' + LS_KEY, String(c.name).toLowerCase());
+      }
       await annRefresh(c);
     }
     SY.last = new Date(); SY.err = '';
@@ -2796,7 +2801,7 @@ function loginNeeded() {
 }
 function loginGate() {
   const c = syncCfg(), old = loginMode() === 'mentor' && c.code && !c.token;   // still set up with the old shared team code
-  if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(offerPlanner, 600);
+  if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(async () => { await checkOwner(); offerPlanner(); }, 600);
   renderWho();
 }
 
@@ -2869,12 +2874,13 @@ function showLogin(msg) {
       } else {
         const r = await syncCall({ action: 'login', name, passcode: code }, { url, role: 'mentor' });
         who = r.name;   // the name as the admin typed it
+        switchPerson(who, prev.role === 'mentor' ? prev.name : '');
         syncSave({ ...prev, url, code: '', token: remember ? r.token : '', name: who, role: 'mentor', on: true, noIds: prev.noIds !== false });
         setSessCode(remember ? '' : r.token, 'token');
       }
       store.set(LOGIN_KEY, JSON.stringify({ name: who, role: boss ? 'boss' : 'mentor', remember, at: ymd(new Date()) }));
       _mOwn = { key: null, val: null };
-      done(); SY.err = ''; SY.seen && SY.seen.clear(); syncNow(true);
+      await reload(); done(); SY.err = ''; SY.seen && SY.seen.clear(); syncNow(true);
       toast(boss ? 'Signed in. Loading the team...' : `Hi ${who}! You're signed in.`);
     } catch (x) { err(x.message); btn.disabled = false; btn.textContent = 'Sign in'; }
   };
@@ -2917,6 +2923,43 @@ function whoMenu() {
     _mOwn = { key: null, val: null };
     await reload(); renderWho(); showLogin();
   };
+}
+
+/* ---------- a different mentor signs in on this computer: put the last person's calendar aside, give the new one their own ---------- */
+const OWNER_KEY = () => 'yes.owner.' + LS_KEY;
+const PERSON_KEYS = () => [HELP_KEY(), HELP_KEY() + '.all', 'yes.plannerAsked.' + LS_KEY, 'yes.awayToast.' + LS_KEY];
+// whose data is on this computer: remembered from now on; before this update, the name the planner was offered to
+function dataOwner() { return store.get(OWNER_KEY()) || (Mall().students.length ? store.get('yes.plannerAsked.' + LS_KEY) : '') || ''; }
+// opened while signed in as someone other than whose data is here (switched people before this update): fix it now
+async function checkOwner() {
+  const L = loginInfo();
+  if (!L || loginMode() !== 'mentor' || L.offline) return;
+  const o = dataOwner();
+  if (!o) { store.set(OWNER_KEY(), L.name); return; }
+  if (o.trim().toLowerCase() !== String(L.name).trim().toLowerCase()) {
+    switchPerson(L.name, '');
+    await reload(); renderWho();
+    toast(`Showing ${L.name}'s calendar. The last person's calendar is put aside for when they sign in again.`, { duration: 9000 });
+  }
+}
+function switchPerson(name, prevName) {
+  const k = x => String(x || '').trim().toLowerCase();
+  let cur = dataOwner() || prevName || '';
+  if (!cur && Mall().students.length) cur = 'previous';   // someone's data is here but we don't know whose
+  store.set(OWNER_KEY(), name);
+  if (!cur || k(cur) === k(name)) return false;
+  // park the last person's calendar (and their settings) so it comes back when they sign in again
+  const keep = { db: DB, keys: {} };
+  for (const key of PERSON_KEYS()) { keep.keys[key] = store.get(key) || ''; store.set(key, ''); }
+  try { localStorage.setItem(LS_KEY + '@' + k(cur), JSON.stringify(keep)); } catch { /* full: their data is still on the team Sheet */ }
+  let mine = null;
+  try { mine = JSON.parse(localStorage.getItem(LS_KEY + '@' + k(name)) || 'null'); } catch { mine = null; }
+  DB = mine && mine.db ? mine.db : addSchoolCalendar(freshDB());
+  if (mine && mine.keys) for (const [key, v] of Object.entries(mine.keys)) store.set(key, v);
+  try { localStorage.removeItem(LS_KEY + '@' + k(name)); } catch { /* ignore */ }
+  saveDB(); _mOwn = { key: null, val: null };
+  if (typeof SY !== 'undefined' && SY.seen) SY.seen.clear();
+  return true;
 }
 
 /* ---------- first sign-in: load this mentor's planner from the team Sheet (only their own, after signing in) ---------- */
