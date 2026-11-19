@@ -770,9 +770,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 let STORAGE_OK = true;
 
 const nextFriday = () => { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + (5 - t.getDay() + 7) % 7)); };
-const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix2: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
+const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix3: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
 function gradeFix(st) {
-  if (!st.goalFix2) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix2 = true; }   // IYT goal: 10 students in a day
+  if (!st.goalFix3) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix3 = true; }   // IYT goal: 10 students in a day
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
   return st;
 }
@@ -780,7 +780,7 @@ function fixMentor(m) {
   const d = MENTOR_DEF();
   if (!m || typeof m !== 'object') return d;
   return { students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
-    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix2: !!(m.settings && m.settings.goalFix2) }) };
+    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3) }) };
 }
 
 /* Modesto City Schools 2026-2027 academic calendar (dates for 9-12 / all grades). Starred = red "important" dates. */
@@ -852,7 +852,7 @@ function seedLists(lists) {
       db.mentor.calls.push({ id: db.nextId++, student_id: s.id, at: `${c.date}T${c.time}`, method: 'in-person', contact: 'student', outcome: c.outcome, notes: '', created: stamp() });
     }
   }
-  db.mentor.settings = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix2: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] };
+  db.mentor.settings = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix3: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] };
   return db;
 }
 const SEED_LISTS = [];
