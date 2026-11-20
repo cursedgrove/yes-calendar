@@ -554,6 +554,9 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .lg-m:last-of-type{border-bottom:0}
 .lg-acts{display:flex;gap:4px;flex-wrap:wrap}
 .lg-found{padding:4px 0}
+/* IT page: "seeing the calendar the way the admin does" bar */
+#itAsBar{position:sticky;top:0;z-index:60;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:5px 10px;background:color-mix(in srgb,var(--peach) 22%,var(--bg));color:var(--text);font-size:13px;border-bottom:1px solid color-mix(in srgb,var(--peach) 45%,transparent)}
+#itAsBar .btn.sm{padding:2px 10px}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1819,7 +1822,22 @@ function setSchoolView(site) {
 /* ---------- the admin's own caseload: "My students" in the mentor picker ---------- */
 const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
 const adminName = () => IS_ADMIN ? (store.get(ADMIN_ME_KEY()) || 'Admin') : '';   // "My students" are saved under Admin (or a name set before this)
+// settings IT set for the admin calendar (IT tools → Admin). Applied once each time IT saves; the admin can still change them after.
+async function applyAdminConf(conf) {
+  const ch = {};
+  for (const k of ['dailyGoal', 'weeklyGoal', 'everyDays']) if (conf[k] !== undefined) ch[k] = +conf[k];
+  if (conf.countMode) ch.countMode = conf.countMode;
+  if (Array.isArray(conf.closures)) ch.closures = conf.closures;
+  if ('dailyGoal' in ch || 'weeklyGoal' in ch) ch.goalCustom = true;
+  if (Object.keys(ch).length) await api('PUT', 'mentor-settings', ch);
+  if (conf.startView) store.set('yes.adminStartView', conf.startView);
+  if (conf.school) setSchoolView(conf.school === '*' ? '' : conf.school);
+  await reload();
+  toast('IT updated settings on this calendar.');
+}
 const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const meLabel = () => window.YES_ADMIN?.it && !itAsAdmin() ? "★ Admin's students" : '★ My students';   // on the IT page, "my students" are the admin's
+const itAsAdmin = () => !!window.YES_ADMIN?.it && store.get('yes.itAsAdmin') === '1';   // IT looking at the calendar the way the admin sees it
 const ownView = () => IS_ADMIN && !!adminName() && sameName(S.mmentor, adminName());
 const TEAMV = () => IS_ADMIN && !ownView();   // the admin looking at the team (not their own students)
 let _mOwn = { key: null, val: null };
@@ -2076,9 +2094,9 @@ function renderMentor() {
       <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>★ My students</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2821,7 +2839,7 @@ function renderViewAs() {
   }
   const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">${meLabel()}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
   sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
   // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
@@ -3560,6 +3578,12 @@ const SY = { busy: false, timer: null, last: '', err: '', seen: new Map() };
 const syncOn = () => { const c = syncCfg(); return !!(c.url && c.on !== false && (c.role === 'boss' ? c.code : (c.token && c.name))); };
 
 // "Chrome on Windows", "Safari on iPhone"...: shown to IT next to signed-in devices and problem reports
+// a random id for this browser, so IT can tell the admin's computers apart (and sign one out)
+function devId() {
+  let id = store.get('yes.devId');
+  if (!id) { id = (crypto.getRandomValues ? [...crypto.getRandomValues(new Uint8Array(8))].map(b => (b % 36).toString(36)).join('') : Math.random().toString(36).slice(2, 10)) + Date.now().toString(36).slice(-4); store.set('yes.devId', id); }
+  return id;
+}
 function deviceName() {
   const u = navigator.userAgent;
   const b = /Edg\//.test(u) ? 'Edge' : /OPR\//.test(u) ? 'Opera' : /Chrome\//.test(u) ? 'Chrome' : /Firefox\//.test(u) ? 'Firefox' : /Safari\//.test(u) ? 'Safari' : 'Browser';
@@ -3586,7 +3610,7 @@ async function syncCall(body, cfg = syncCfg()) {
   if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(cfg.url || '')) throw new Error("Couldn't connect right now. Try again in a minute.");
   let r;
   // the admin sends the admin code; a mentor sends their name + the device key from signing in
-  const auth = cfg.role === 'boss' ? { code: cfg.code } : { name: cfg.name, token: cfg.token };
+  const auth = cfg.role === 'boss' ? { code: cfg.code, dev: devId() + '|' + deviceName(), be: cfg.be || '' } : { name: cfg.name, token: cfg.token };
   // plain text body = no CORS preflight; a request that never answers gives up after 2 minutes so syncing can't get stuck
   const ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac && setTimeout(() => ac.abort(), 120000);
   try { r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ ...auth, ...body }), signal: ac?.signal }); }
@@ -3595,7 +3619,9 @@ async function syncCall(body, cfg = syncCfg()) {
   let j; try { j = await r.json(); } catch { throw new Error("Couldn't connect right now. Try again in a minute."); }
   const noKey = cfg.role !== 'boss' && (j.signedOut || j.error === 'Please sign in' || j.error === 'Wrong code') && body.action !== 'login';
   if (noKey && typeof kickedOut === 'function') kickedOut(!j.signedOut);
-  if (j.error) throw new Error(noKey ? 'You were signed out. Sign in again with your passcode.' : j.error);
+  const bossOut = cfg.role === 'boss' && j.signedOut;   // IT signed this admin computer out
+  if (bossOut && typeof adminKicked === 'function') adminKicked();
+  if (j.error) throw new Error(noKey ? 'You were signed out. Sign in again with your passcode.' : bossOut ? 'IT signed this computer out. Sign in again with the admin code.' : j.error);
   return j;
 }
 function syncStatus() {
@@ -3900,6 +3926,15 @@ function checkReload(stamp) {
   toast('Updating to the newest version...'); setTimeout(go, 1500);
 }
 // every 20 seconds: ask (cheaply) whether this mentor's planner tab changed; if it did, read it now and share the result
+/* ---------- the admin calendar: settings IT set for it, and noticing IT signed this computer out ---------- */
+async function adminWatch() {
+  if (!syncOn() || !['admin', 'admintest'].includes(loginMode()) || SY.confOff || SY.confBusy) return;
+  if (Date.now() - (SY.confAt || 0) < (document.hidden ? 120000 : 30000)) return;   // every 30 s is plenty
+  SY.confAt = Date.now(); SY.confBusy = true;
+  let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
+  const k = 'yes.adminConf.' + LS_KEY;
+  if (j && j.ok && j.stamp && store.get(k) !== j.stamp) { store.set(k, j.stamp); try { await applyAdminConf(j.conf || {}); } catch (e) { reportError('admin settings', e); } }
+}
 async function plannerWatch() {   // one tiny call: has the admin sent something, or has my planner Sheet tab changed?
   if (!syncOn() || SY.watchBusy) return;
   const c = syncCfg(); if (c.role === 'boss') return;
@@ -3961,7 +3996,7 @@ function syncInit() {
   };
   setTimeout(() => syncNow(), 1500);
   setInterval(() => { if (!document.hidden) syncNow(); }, 60000);                   // boss: every minute; mentor: a safety resend
-  const watchLoop = async () => { await plannerWatch(); setTimeout(watchLoop, document.hidden ? 30000 : 10000); };   // every 10 s (30 s in a background tab)
+  const watchLoop = async () => { await plannerWatch(); await adminWatch(); setTimeout(watchLoop, document.hidden ? 30000 : 10000); };   // every 10 s (30 s in a background tab)
   setTimeout(watchLoop, 4000);
   addEventListener('visibilitychange', () => { if (!document.hidden) plannerWatch(); });
   setInterval(() => { if (!SY.annWatch && document.hidden && syncOn() && syncCfg().role !== 'boss') annRefresh().catch(() => {}); }, 60000);   // older team script: background tab still hears about admin updates
@@ -4176,6 +4211,7 @@ function loginNeeded() {
   return L.role === 'boss' ? !c.code : !c.token;   // signed out, or didn't tick "keep me signed in" and this is a new session
 }
 function loginGate() {
+  renderItAs();
   const c = syncCfg(), old = loginMode() === 'mentor' && c.code && !c.token;   // still set up with the old shared team code
   if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(async () => { await checkOwner(); offerPlanner(); }, 600);
   renderWho();
@@ -4242,10 +4278,10 @@ function showLogin(msg) {
       const url = syncCfg().url || TEAM_URL, boss = mode !== 'mentor', prev = syncCfg();
       let who = name;
       if (boss) {
-        const p = await syncCall({ action: 'ping' }, { url, code, role: 'boss' });
+        const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
         if (mode !== 'it' && p.role !== 'boss' && p.role !== 'it') throw new Error("That's not the admin code.");
-        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true });
+        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '' });
         setSessCode(remember ? '' : code);
       } else {
         const r = await syncCall({ action: 'login', name, passcode: code, device: deviceName() }, { url, role: 'mentor' });
@@ -4271,12 +4307,13 @@ function renderWho() {
   }
   const L = loginInfo();
   b.hidden = !L;
-  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(L.role === 'boss' ? (loginMode() === 'it' ? 'IT' : 'Admin') : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
-  if (L) b.title = (L.role === 'boss' ? (loginMode() === 'it' ? 'IT' : 'Admin') : L.name) + (L.offline ? ' (offline)' : '');
+  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(L.role === 'boss' ? whoLabel() : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
+  if (L) b.title = (L.role === 'boss' ? whoLabel() : L.name) + (L.offline ? ' (offline)' : '');
 }
+const whoLabel = () => loginMode() === 'it' && !itAsAdmin() ? 'IT' : 'Admin';
 function whoMenu() {
   const L = loginInfo() || {}, mode = loginMode();
-  openModal(`<div class="m-head"><h2>${esc(L.role === 'boss' ? (mode === 'it' ? 'IT' : 'Admin') : L.name || '')}</h2><button class="iconbtn" data-x>✕</button></div>
+  openModal(`<div class="m-head"><h2>${esc(L.role === 'boss' ? whoLabel() : L.name || '')}</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
     <p class="muted sm" style="margin:0">${L.offline ? 'Working offline. Nothing is being shared.' : mode === 'test' ? 'Test copy. Signing out lets you pick someone else (this test copy gets reset).' : syncStatus() === 'problem' ? `<span style="color:var(--red)">Sync problem: ${esc(SY.err)}</span>` : SY.last ? 'Shared with your admin at ' + fmtTime(SY.last) + '.' : 'Signed in.'}</p>
     ${mode === 'mentor' || mode === 'test' ? '' : ''}
@@ -4371,6 +4408,13 @@ async function offerPlanner() {
 }
 
 /* ---------- the admin reset a mentor's passcode (or signed them out): back to the sign-in screen ---------- */
+// IT signed this admin computer out (IT tools → Admin): back to the sign-in screen
+function adminKicked() {
+  if (!['admin', 'admintest'].includes(loginMode()) || SY.kicked) return;
+  SY.kicked = true;
+  syncSave({ ...syncCfg(), code: '', be: '' }); setSessCode('');
+  setTimeout(() => { SY.kicked = false; closeModal(); showLogin('IT signed this computer out. Sign in again with the admin code.'); }, 50);
+}
 function kickedOut(oldCode) {
   if (loginMode() !== 'mentor' || SY.kicked) return;
   SY.kicked = true;
@@ -4501,7 +4545,7 @@ async function openLogins(made) {
 
 /* ---------- IT tools: tabs ---------- */
 const IT = { tab: 'status', health: null, ms: 0 };
-const IT_TABS = [['status', 'Status'], ['mentors', 'Mentors'], ['problems', 'Problems'], ['check', 'Data check'], ['names', 'Names'], ['compare', 'Compare'], ['accounts', 'Accounts'], ['security', 'Security'], ['maint', 'Maintenance']];
+const IT_TABS = [['status', 'Status'], ['mentors', 'Mentors'], ['admin', 'Admin'], ['problems', 'Problems'], ['check', 'Data check'], ['names', 'Names'], ['compare', 'Compare'], ['accounts', 'Accounts'], ['security', 'Security'], ['maint', 'Maintenance']];
 const itAgo = iso => { if (!iso) return 'never'; const d = new Date(String(iso).replace(' ', 'T')); if (isNaN(d)) return String(iso); const m = Math.round((Date.now() - d) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
 const itCall = body => syncCall(body);
 async function openIT(tab, quick) {   // quick: show what we have right away (IT tools button, switching tabs)
@@ -4524,11 +4568,73 @@ async function openIT(tab, quick) {   // quick: show what we have right away (IT
   IT.ping = await ping;
   if (!had || ['status', 'mentors'].includes(IT.tab)) itShow();   // don't redraw a tab someone may be typing in
 }
+/* ---------- IT tools → Admin: the admin's computers, their students, settings for their calendar ---------- */
+async function itAdminTab(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let r; try { r = await itCall({ action: 'it-admin' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(/Unknown action/.test(e.message) ? 'This needs the team script v23.' : e.message)}</p>`; return; }
+  if (el.dataset.tab && el.dataset.tab !== 'admin') return;
+  const me = adminName(), mine = Mall().students.filter(s => !s.src && sameName(s.mentor, me)), ids = new Set(mine.map(s => s.id));
+  const sess = Mall().calls.filter(c => ids.has(c.student_id)), last = sess.map(c => c.at).sort().at(-1);
+  const cf = r.conf || {}, sites = schoolSites(), v = x => x === undefined ? '' : esc(String(x));
+  let cl = clone(cf.closures || []);
+  el.innerHTML = `
+    <h4 style="margin-top:0">See it as the admin does</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="ad_as">Switch to the admin's view</button><span class="muted sm">Same calendar, labeled Admin, without the IT tools. A bar at the top switches back.</span></div>
+    <h4>Admin's students</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><span>${mine.length} student${mine.length === 1 ? '' : 's'} · ${sess.length} session${sess.length === 1 ? '' : 's'}${last ? ' · last on ' + esc(fmtDateShort(parseD(last.slice(0, 10)))) : ''}</span>
+      <button class="btn" id="ad_open">Open the admin's students</button></div>
+    <div class="muted sm">Adding, changing or deleting them here (roster, sessions) goes to the admin's own calendar too, like their other computers.</div>
+    <h4>Where the admin is signed in</h4>
+    ${r.devices.length ? `<table class="team-tbl"><thead><tr><th>Computer</th><th>Signed in</th><th>Last used</th><th></th></tr></thead><tbody>${r.devices.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.first)}</td><td>${esc(d.last)}</td><td><button class="btn sm" data-adout="${esc(d.id)}">Sign out</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No admin computers seen yet (they show up once the admin page is open with this script version).</p>'}
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn danger" id="ad_outall">Sign the admin out everywhere</button><button class="btn" id="ad_code">Change the admin code</button></div>
+    <div class="muted sm">Signing out sends the admin back to the sign-in screen; the admin code still works. Lost or shared code: change it instead.</div>
+    <h4>Settings for the admin's calendar</h4>
+    <div class="muted sm" style="margin-bottom:6px">Leave a box blank to keep the admin's own setting. Saved settings reach the admin's calendar within about 30 seconds${r.confAt ? ` · last saved ${esc(r.confAt)}` : ''}.</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <label class="field"><span>Daily goal</span><input type="number" min="0" id="ad_d" value="${v(cf.dailyGoal)}" style="width:90px"></label>
+      <label class="field"><span>Weekly goal</span><input type="number" min="0" id="ad_w" value="${v(cf.weeklyGoal)}" style="width:90px"></label>
+      <label class="field"><span>Call in again after ___ days</span><input type="number" min="1" max="90" id="ad_e" value="${v(cf.everyDays)}" style="width:90px"></label>
+      <label class="field"><span>Counts toward goals</span><select id="ad_c"><option value="">(keep theirs)</option><option value="reached" ${cf.countMode === 'reached' ? 'selected' : ''}>Only when they came in</option><option value="attempts" ${cf.countMode === 'attempts' ? 'selected' : ''}>Every pull-out</option></select></label>
+      <label class="field"><span>Opens on</span><select id="ad_v"><option value="">(keep theirs)</option>${[['mentor', 'Mentoring'], ['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(([k, l]) => `<option value="${k}" ${cf.startView === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>School shown</span><select id="ad_s"><option value="">(keep theirs)</option><option value="*" ${cf.school === '*' ? 'selected' : ''}>${sites.length > 2 ? 'All schools' : 'Both schools'}</option>${sites.map(x => `<option value="${esc(x)}" ${cf.school === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+    </div>
+    <div class="field"><span>Days the IYT room is closed <span class="muted sm">(${cf.closures ? 'set by IT' : "blank: keep the admin's list"})</span></span><div id="ad_cl"></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><input type="date" id="ad_cs"><span class="muted">to</span><input type="date" id="ad_ce"><input id="ad_cn" placeholder="label (ex: Winter break)" style="flex:1;min-width:140px"><button class="btn" id="ad_cadd">Add</button><button class="linkbtn sm" id="ad_cmine">Start from this calendar's list</button></div></div>
+    <div class="row" style="gap:8px"><button class="btn primary" id="ad_save">Save for the admin</button><button class="btn" id="ad_clear">Clear IT's settings</button></div>`;
+  const drawCl = () => { const b = $('#ad_cl'); if (b) b.innerHTML = cl.length ? cl.sort((a, b2) => a.start.localeCompare(b2.start)).map((c, i) => `<div class="row" style="gap:6px"><span>${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}</span><button class="linkbtn sm" data-adcl="${i}">remove</button></div>`).join('') : '<span class="muted sm">none</span>'; };
+  drawCl();
+  let clTouched = !!cf.closures;
+  $('#ad_cl').onclick = e => { const b = e.target.closest('[data-adcl]'); if (b) { cl.splice(+b.dataset.adcl, 1); clTouched = true; drawCl(); } };
+  $('#ad_cadd').onclick = () => { const a = $('#ad_cs').value, b = $('#ad_ce').value || a; if (!a) return toast('Pick a start date'); cl.push({ start: a <= b ? a : b, end: a <= b ? b : a, label: $('#ad_cn').value.trim() }); clTouched = true; $('#ad_cs').value = $('#ad_ce').value = $('#ad_cn').value = ''; drawCl(); };
+  $('#ad_cmine').onclick = () => { cl = clone(M().settings.closures || []); clTouched = true; drawCl(); };
+  $('#ad_as').onclick = () => setItAsAdmin(true);
+  $('#ad_open').onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs('__me__'); };
+  $('#ad_code').onclick = () => openIT('security', true);
+  $$('#it_body [data-adout]').forEach(b => { b.onclick = async () => { b.disabled = true; try { await itCall({ action: 'it-admin-out', dev: b.dataset.adout }); toast('Signed out. That computer goes back to the sign-in screen.'); itAdminTab(el); } catch (e) { b.disabled = false; toast(e.message); } }; });
+  $('#ad_outall').onclick = async () => { if (!confirm('Sign the admin out on every computer? They sign in again with the admin code.')) return; try { await itCall({ action: 'it-admin-out-all' }); toast('The admin is signed out everywhere.'); itAdminTab(el); } catch (e) { toast(e.message); } };
+  const save = async conf => { try { await itCall({ action: 'it-admin-conf', conf }); toast("Saved. The admin's calendar picks it up within about 30 seconds."); itAdminTab(el); } catch (e) { toast(e.message); } };
+  $('#ad_save').onclick = () => save({ dailyGoal: $('#ad_d').value, weeklyGoal: $('#ad_w').value, everyDays: $('#ad_e').value, countMode: $('#ad_c').value, startView: $('#ad_v').value, school: $('#ad_s').value, closures: clTouched ? cl : undefined });
+  $('#ad_clear').onclick = () => save({});
+}
+/* IT looking at the calendar the way the admin sees it */
+function setItAsAdmin(on) {
+  store.set('yes.itAsAdmin', on ? '1' : ''); closeModal(); renderItAs(); renderWho(); renderViewAs(); render();
+  toast(on ? "Now seeing it the way the admin does." : 'Back to IT.');
+}
+function renderItAs() {
+  if (!window.YES_ADMIN?.it) return;
+  let bar = $('#itAsBar');
+  if (!itAsAdmin()) { bar?.remove(); document.body.classList.remove('it-as-admin'); return; }
+  document.body.classList.add('it-as-admin');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'itAsBar'; document.body.prepend(bar); }
+  bar.innerHTML = `<span>IT · seeing the calendar the way the admin does</span><button class="btn sm" id="itAsBack">Back to IT</button>`;
+  $('#itAsBack').onclick = () => setItAsAdmin(false);
+}
 function itShow() {
   const el = $('#it_body'); if (!el) return;
   if (IT.health?.old && !['maint'].includes(IT.tab)) { el.innerHTML = `<p style="color:var(--peach)">These tools need the team script v14 (it's v${esc(IT.health.version)}). Maintenance still works.</p>`; return; }
   el.dataset.tab = IT.tab;   // a tab still loading when you switch away won't draw over the new one
-  ({ status: itStatusTab, mentors: itMentorsTab, problems: itProblemsTab, check: itCheckTab, names: itNamesTab, compare: itCompareTab, accounts: itAccountsTab, security: itSecurityTab, maint: () => itMaintenance(IT.health) })[IT.tab]?.(el);
+  ({ status: itStatusTab, mentors: itMentorsTab, admin: itAdminTab, problems: itProblemsTab, check: itCheckTab, names: itNamesTab, compare: itCompareTab, accounts: itAccountsTab, security: itSecurityTab, maint: () => itMaintenance(IT.health) })[IT.tab]?.(el);
 }
 const itCard = (state, label, value, note = '') => `<div class="it-card ${state}"><div class="lbl">${label}</div><b>${value}</b>${note ? `<div class="muted sm">${note}</div>` : ''}</div>`;
 function itSecs(ms) { return ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1) + ' s'; }
@@ -4838,7 +4944,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120120521';
+const BUILD_ID = '20261120121251';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
