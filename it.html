@@ -649,6 +649,86 @@ html,body{font-size:13px}
 .set-more{padding-left:10px;border-left:2px solid var(--s1);margin:2px 0}
 .set-more[open]{padding-bottom:4px}
 
+/* ---- screen-size layer: loaded last so it wins over the look/theme passes ---- */
+html,body{max-width:100%;overflow-x:hidden}
+.topbar{min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.topbar::-webkit-scrollbar{display:none}
+.topbar>*{flex:none}
+.title-btn{min-width:0;flex:0 1 auto!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who-btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;max-width:200px}
+.who-nm{overflow:hidden;text-overflow:ellipsis}
+.view-as{max-width:180px;min-width:0}
+
+/* buttons that sit inside dialogs never turn into the phone's floating view bar */
+.modal .seg,.popover .seg,.it-tabs.seg,.tp-decor.seg{position:static!important;transform:none!important;box-shadow:none!important;left:auto!important;bottom:auto!important}
+.it-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 16px}
+
+/* dialogs: footers and forms wrap instead of pushing the box wider */
+.modal-wrap{grid-template-columns:minmax(0,1fr)}
+.modal{max-width:100%;justify-self:center}
+.modal>*{min-width:0}
+.m-foot{flex-wrap:wrap}
+.modal input:not([type=checkbox]):not([type=radio]),.modal select,.modal textarea{max-width:100%;min-width:0}
+.modal .row>.field{flex:1 1 150px}
+.modal .m-body,.modal .body{overflow-x:auto}
+.team-tbl,.roster-table{min-width:0}
+.m-toolbar input{flex:1 1 200px;min-width:140px}
+.tg-head,.tg-allday{grid-template-columns:58px repeat(var(--n),minmax(0,1fr))}
+.tg-cols{grid-template-columns:repeat(var(--n),minmax(0,1fr))}
+.dh{min-width:0;overflow:hidden}
+.it-cards{grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+
+/* Mentoring tab: stat boxes fit the width they have */
+.m-stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))!important}
+
+/* laptops */
+@media (max-width:1280px){
+  .search input{width:150px}
+  .who-btn{max-width:130px}
+}
+@media (max-width:1100px){
+  .who-nm{display:none}.who-btn{padding:4px 6px}
+  #themeBtn{display:none}
+  .view-as{max-width:140px}
+}
+/* tablets: sidebar slides in from the menu button */
+@media (max-width:900px){
+  .app{grid-template-columns:1fr!important}
+  .sidebar{top:44px!important}
+  .app.sb-open .scrim{inset:44px 0 0 0!important}
+  .main{min-width:0;width:100%}
+  #insightsBtn{display:none}
+  .topbar .seg button{padding:4px 8px}
+  .view-as{max-width:120px}
+  .mentor{padding:12px 12px 80px}
+}
+/* phones */
+@media (max-width:560px){
+  .topbar{gap:4px;padding:0 6px}
+  .title-btn{font-size:14px!important;max-width:42vw}
+  #settingsBtn{font-size:0;padding:4px 8px}#settingsBtn::before{content:"⚙";font-size:15px}
+  .view-as{max-width:96px;font-size:12px}
+  .topbar>.seg{background:var(--topbar,var(--mantle));border:1px solid rgba(255,255,255,.25);padding:3px;border-radius:10px;gap:2px;left:8px!important;right:8px;transform:none!important;justify-content:center;max-width:none;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap}
+  .topbar>.seg button{flex:none;padding:5px 9px;font-size:12px}
+  .tg-head,.tg-allday{grid-template-columns:44px repeat(var(--n),minmax(0,1fr))}
+  .dh .dw,.dh .dd{display:block!important;margin:0!important;font-size:11px!important}
+  .dh .busy{font-size:9px;line-height:1.1}
+  .m-toolbar input{flex-basis:100%}
+  .modal-wrap{padding:6px;place-items:center}
+  .modal,.modal.sm,.modal.lg{width:100%!important;max-height:calc(100dvh - 12px);border-radius:12px}
+  .m-head{padding:10px 12px!important}
+  .m-foot{padding:10px 12px;justify-content:stretch}
+  .m-foot>.btn{flex:1 1 auto}
+  .m-foot .left{margin-right:0;flex-basis:100%}
+  .it-tabs{flex-wrap:nowrap;overflow-x:auto;margin:0 12px;scrollbar-width:none}
+  .it-tabs button{flex:none}
+  .m-stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .toasts{left:8px!important;right:8px!important;bottom:62px!important;align-items:stretch!important}
+  .toast{max-width:none}
+  .ag-item{grid-template-columns:72px 10px 1fr}
+  .tp-grid{grid-template-columns:1fr}
+}
+
 </style>
 </head>
 <body>
@@ -3904,7 +3984,8 @@ function renderWho() {
   }
   const L = loginInfo();
   b.hidden = !L;
-  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span>${esc(L.role === 'boss' ? (loginMode() === 'it' ? 'IT' : 'Admin') : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}`;
+  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(L.role === 'boss' ? (loginMode() === 'it' ? 'IT' : 'Admin') : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
+  if (L) b.title = (L.role === 'boss' ? (loginMode() === 'it' ? 'IT' : 'Admin') : L.name) + (L.offline ? ' (offline)' : '');
 }
 function whoMenu() {
   const L = loginInfo() || {}, mode = loginMode();
@@ -4053,7 +4134,7 @@ async function openIT(tab) {
   if (!syncOn()) return toast('Sign in with the IT code first.');
   if (tab) IT.tab = tab;
   openModal(`<div class="m-head"><h2>IT tools</h2><button class="iconbtn" data-x>✕</button></div>
-    <div class="seg it-tabs" style="flex-wrap:wrap;margin:0 16px">${IT_TABS.map(([k, l]) => `<button data-itab="${k}" class="${IT.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="seg it-tabs">${IT_TABS.map(([k, l]) => `<button data-itab="${k}" class="${IT.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="m-body" id="it_body"><p class="muted">Checking...</p></div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   $$('#modal [data-itab]').forEach(b => { b.onclick = () => { IT.tab = b.dataset.itab; $$('#modal [data-itab]').forEach(x => x.classList.toggle('on', x === b)); itShow(); }; });
@@ -4374,7 +4455,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119232235';
+const BUILD_ID = '20261119233431';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
