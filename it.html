@@ -747,6 +747,11 @@ html,body{max-width:100%;overflow-x:hidden}
 }
 @container (max-width:46px){ .tev .nm-short{display:none}.tev .nm-ini{display:inline}.tev b{font-size:9.5px;letter-spacing:-.4px;text-overflow:clip;margin:0 -5px;text-align:center} }
 
+/* sidebar "Who came in?" box: one row of picker + both buttons */
+.qbar-sm{flex-wrap:wrap}
+.qbar-sm .qb-when{flex:0 0 62px;width:62px;min-width:0;padding-left:6px;padding-right:2px}
+.qbar-sm .btn{flex:1 1 auto;min-width:0;white-space:nowrap;padding:4px 7px}
+
 </style>
 </head>
 <body>
@@ -1756,6 +1761,7 @@ const Mall = () => S.mentor || { students: [], calls: [], grades: [], settings: 
 // "Own" = students with no mentor set, or with this mentor's name. Students another mentor owns
 // (like "Isabel's" kids on Daisy's planner) stay saved but aren't shown or counted.
 function myMentor() {
+  if (IS_ADMIN) return ownView() ? adminName() : '';
   // whoever signed in is who this calendar belongs to
   // (unless nobody on the list has that name and they aren't helping anyone: then go by the list, like before)
   try {
@@ -1773,10 +1779,68 @@ function myMentor() {
   if (n && (!Object.keys(cnt).length || Object.keys(cnt).some(k => k.toLowerCase().split(/\s+/)[0] === n.toLowerCase().split(/\s+/)[0]))) return n;
   return Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 }
+/* ---------- schools: each mentor's school comes from their planner tab ("Daisy - Davis", "Maria - Johansen") ---------- */
+const SCHOOL_FULL = { Davis: 'Grace M. Davis High School', Johansen: 'Johansen High School' };
+function siteMap() {
+  if (typeof SY !== 'undefined' && SY.sites) return SY.sites;
+  try { const v = JSON.parse(store.get('yes.sites.' + LS_KEY) || 'null'); if (v && v.sites) { if (typeof SY !== 'undefined') { SY.sites = v.sites; SY.schoolNames = v.schools || {}; } return v.sites; } } catch { /* none yet */ }
+  return (window.YES_ADMIN && window.YES_ADMIN.sampleSites) || {};
+}
+function siteOf(name) {
+  const k = String(name || '').trim().toLowerCase(); if (!k) return '';
+  const m = siteMap(), e = Object.entries(m);
+  const hit = e.find(([n]) => n.toLowerCase() === k) || e.find(([n]) => n.toLowerCase().split(/\s+/)[0] === k.split(/\s+/)[0]);
+  return hit ? hit[1] : '';
+}
+const schoolSites = () => [...new Set(Object.values(siteMap()))].sort();
+const inSchool = name => !S.mschool || siteOf(name) === S.mschool;
+function mySchool() {   // for a mentor's own calendar: the school their planner tab says
+  const v = (typeof SY !== 'undefined' && SY.school) || store.get('yes.school.' + LS_KEY) || '';
+  return v || SCHOOL_FULL.Davis;
+}
+function reportSchool() {
+  if (!IS_ADMIN) return mySchool().replace(/ High School$/, '');
+  const site = S.mmentor ? siteOf(S.mmentor) : S.mschool;
+  if (site) return (SCHOOL_FULL[site] || site).replace(/ High School$/, '');
+  const all = schoolSites(); return all.length ? all.map(x => (SCHOOL_FULL[x] || x).replace(/ High School$/, '')).join(' & ') : 'Grace M. Davis';
+}
+try { if (IS_ADMIN) S.mschool = store.get('yes.schoolView.' + LS_KEY) || ''; } catch { /* S not ready: set on first use */ }
+function setSchoolView(site) {
+  S.mschool = site || ''; store.set('yes.schoolView.' + LS_KEY, S.mschool);
+  if (S.mmentor && !inSchool(S.mmentor)) { S.mmentor = ''; store.set('yes.viewAs.' + LS_KEY, ''); }
+  _mOwn = { key: null, val: null }; renderViewAs(); render();
+}
+/* ---------- the admin's own caseload: "My students" in the mentor picker ---------- */
+const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
+const adminName = () => (IS_ADMIN && store.get(ADMIN_ME_KEY())) || '';
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const ownView = () => IS_ADMIN && !!adminName() && sameName(S.mmentor, adminName());
+const TEAMV = () => IS_ADMIN && !ownView();   // the admin looking at the team (not their own students)
+function askAdminName(then) {
+  openModal(`<div class="m-head"><h2>Your own students</h2><button class="x" data-x>×</button></div>
+  <div class="m-body"><p class="muted">Log your own mentoring sessions here like a mentor does. Your students and sessions go on the team Sheet under this name, so they show up on the scoreboard and in reports.</p>
+  <label class="field"><span>Your name (as it should show on the team list)</span><input id="am_name" value="${esc(adminName())}" placeholder="e.g. Ms. Lopez" maxlength="40"></label></div>
+  <div class="m-foot"><button class="btn" data-x>Cancel</button><button class="btn primary" id="am_go">Save</button></div>`, 'sm');
+  const go = () => {
+    const n = $('#am_name').value.trim().replace(/\s+/g, ' ');
+    if (!n) return $('#am_name').focus();
+    if (schoolTeamNames().some(x => sameName(x, n) && !sameName(x, adminName())) && !confirm(`${n} is already a mentor on the team list. Use the same name anyway? Their students and yours would mix.`)) return;
+    store.set(ADMIN_ME_KEY(), n); closeModal(); then && then(n);
+  };
+  $('#am_go').onclick = go; $('#am_name').onkeydown = e => { if (e.key === 'Enter') go(); };
+  setTimeout(() => $('#am_name')?.focus(), 50);
+}
 let _mOwn = { key: null, val: null };
 const M = () => {
   const m = Mall();
-  if (IS_ADMIN && !S.mmentor) return m;
+  if (IS_ADMIN && !S.mmentor) {
+    if (!S.mschool) return m;
+    const key = [m, 'school:' + S.mschool, m.students.length, m.calls.length, (m.grades || []).length, JSON.stringify(siteMap())];
+    if (_mOwn.key && key.every((k, i) => k === _mOwn.key[i])) return _mOwn.val;
+    const students = m.students.filter(s => inSchool(s.mentor || s.src)), ids = new Set(students.map(s => s.id));
+    const val = { ...m, students, calls: m.calls.filter(c => ids.has(c.student_id)), grades: (m.grades || []).filter(g => ids.has(g.student_id)) };
+    _mOwn = { key, val }; return val;
+  }
   const me = (IS_ADMIN ? S.mmentor : myMentor()).trim().toLowerCase();
   if (!me) return m;
   const help = IS_ADMIN ? '' : helpView().toLowerCase();
@@ -1809,12 +1873,12 @@ function teamGoal(who) {
   const f = x => String(x || '').trim().toLowerCase().split(/\s+/)[0];
   if (who) return TEAM_GOALS[f(who)] || { dailyGoal: 0, weeklyGoal: 0 };
   // admin looking at everyone: add up the mentors' goals
-  let d = 0, w = 0; for (const n of (typeof teamNamesAll === 'function' ? teamNamesAll() : [])) { const g = TEAM_GOALS[f(n)]; if (g) { d += g.dailyGoal; w += g.weeklyGoal; } }
+  let d = 0, w = 0; for (const n of (typeof schoolTeamNames === 'function' ? schoolTeamNames() : [])) { const g = TEAM_GOALS[f(n)]; if (g) { d += g.dailyGoal; w += g.weeklyGoal; } }
   return { dailyGoal: d, weeklyGoal: w };
 }
 const mset = () => {
   const st = { ...MDEF, ...M().settings };
-  if (!st.goalCustom) {
+  if (!st.goalCustom && !ownView()) {   // the admin's own students use the Goals settings (10 a day unless changed)
     let who = '';
     try { who = IS_ADMIN ? (S.mmentor || '') : myMentor(); } catch { who = ''; }
     // helping someone (Abel with Daisy's students): their goal comes along
@@ -1980,7 +2044,7 @@ function renderMentor() {
   const weekClosures = closures().filter(c => c.start <= ymd(we) && c.end >= ymd(ws));
   const week = callsIn(ws, we), weekGoalN = goalN(week);
   const todayN = goalN(callsOn(today));
-  const mentors = [...new Set(Mall().students.map(s => s.mentor).filter(Boolean))].sort();
+  const mentors = [...new Set(Mall().students.map(s => s.mentor).filter(Boolean))].filter(inSchool).sort();
   const q = (S.mq || '').toLowerCase();
   const active = M().students.filter(s => s.active !== false);
   const shown = active.filter(s => !q || [s.name, s.school, s.mentor, s.phone, s.idnum, s.classes, s.teacher, s.room].join(' ').toLowerCase().includes(q));
@@ -1996,7 +2060,7 @@ function renderMentor() {
   const away = awayList(M().students, M().calls), awayIds = new Map(away.map(x => [x.s.id, x]));
 
   const phoneLinks = s => s.phone ? `<a href="${telHref(s.phone)}" title="Call">${esc(s.phone)}</a>` : '';
-  const acts = s => IS_ADMIN ? `<div class="ms-acts"><button data-q="reached" title="Log a session for ${esc(s.mentor || 'their mentor')}">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>` : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
+  const acts = s => TEAMV() ? `<div class="ms-acts"><button data-q="reached" title="Log a session for ${esc(s.mentor || 'their mentor')}">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>` : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
   const needRow = s => {
     const tries = (wk.get(s.id) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), lr = lastCall(s.id, c => c.outcome === 'reached');
     const lt = tries[tries.length - 1];
@@ -2017,11 +2081,12 @@ function renderMentor() {
 
   const h = `<div class="mentor">
     <div class="m-toolbar">
-      <input id="mq" placeholder="${IS_ADMIN ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
+      <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN && mentors.length > 1 ? `<select id="mmentor"><option value="">All mentors</option>${mentors.map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">Both schools</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2029,10 +2094,10 @@ function renderMentor() {
       <button class="btn" data-mact="csv" title="Download this week's check-ins as a spreadsheet">Export week</button>
     </div>
     ${M().students.length && isCur ? quickBar('main') : ''}
-    ${!M().students.length && IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
-    ${!M().students.length && !IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
+    ${!M().students.length && TEAMV() ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
+    ${!M().students.length && !TEAMV() ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
     ${weekClosures.map(c => `<div class="m-closed"><b>IYT room closed</b> ${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}. No pull-outs those days; anyone due then moves to the next open day.</div>`).join('')}
-    ${IS_ADMIN ? teamCard(ws, we) : ''}
+    ${TEAMV() ? teamCard(ws, we) : ''}
     <div class="m-stats">
       <div class="m-stat">${hasGoal ? ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)') : ''}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span>` : ''}</div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : !hasGoal ? 'came in today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
       <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more to go`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
@@ -2048,13 +2113,15 @@ function renderMentor() {
       <div class="m-list"><h3><span>${st.openDays === 0 ? 'Still due (room closed this week)' : 'Due this week'} <span class="muted">(${need.length})</span></span></h3>${need.map(needRow).join('') || `<div class="m-empty">${active.length ? (q ? 'No matches' : 'Nobody else is due this week.') : 'No students yet'}</div>`}</div>
       <div class="m-list"><h3><span>Up to date <span class="muted">(${done.length})</span></span></h3>${done.map(doneRow).join('') || '<div class="m-empty">Nobody yet</div>'}</div>
     </div>
-    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts">${c.outcome === 'no-show' && !IS_ADMIN ? '<button data-mswap title="Someone else came in instead">Swap</button>' : ''}<button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
+    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts">${c.outcome === 'no-show' && !TEAMV() ? '<button data-mswap title="Someone else came in instead">Swap</button>' : ''}<button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
   </div>`;
   $('#main').innerHTML = h;
   const root = $('.mentor');
   const mq = $('#mq');
   mq.oninput = () => { S.mq = mq.value; const pos = mq.selectionStart; renderMentor(); const n = $('#mq'); n.focus(); n.setSelectionRange(pos, pos); };
   $('#mmentor')?.addEventListener('change', e => setViewAs(e.target.value));
+
+  $('#mschool')?.addEventListener('change', e => setSchoolView(e.target.value));
   $('#mhelp')?.addEventListener('change', e => setHelp(e.target.value));
   root.onclick = async e => {
     const a = e.target.closest('[data-mact]')?.dataset.mact;
@@ -2078,7 +2145,7 @@ function renderMentor() {
     if (qb && sid) { if (isCur) return quickLog(sid, qb.dataset.q); return openLog({ sid, preset: { outcome: qb.dataset.q, at: ymd(ws) + 'T12:00' } }); }
     if (e.target.closest('[data-absent]') && sid) return markAbsent(sid);
     if (e.target.closest('[data-mlog]') && sid) return openLog({ sid, preset: isCur ? {} : { at: ymd(ws) + 'T12:00' } });
-    if (e.target.closest('[data-mstu]') && sid) return IS_ADMIN ? openDueCard(stuById(sid)) : openStudent(stuById(sid));
+    if (e.target.closest('[data-mstu]') && sid) return TEAMV() ? openDueCard(stuById(sid)) : openStudent(stuById(sid));
     const crow = e.target.closest('[data-cid]'), cid = crow ? +crow.dataset.cid : null;
     if (cid && e.target.closest('[data-mdel]')) return deleteCall(cid);
     if (cid && e.target.closest('[data-mswap]')) return openSwap(M().calls.find(c => c.id === cid));
@@ -2117,7 +2184,7 @@ function renderMentorCard() {
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
   const awayN = awayList(M().students, M().calls).length;
   el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}${+mset().dailyGoal ? '/' + st.dailyGoal : ''}</b></span><span>Week <b>${goalN(w)}${+mset().weeklyGoal ? '/' + st.weeklyGoal : ''}</b></span></div>${+mset().dailyGoal ? `<div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div>` : ''}<div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
-  if (!IS_ADMIN) el.insertAdjacentHTML('beforeend', quickBar('side', true));
+  el.insertAdjacentHTML('beforeend', quickBar('side', true));   // the admin logs sessions from here too
   el.onclick = e => { if (e.target.closest('[data-qbar]')) return; closeSidebar(); setView('mentor'); };
 }
 
@@ -2220,7 +2287,7 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
     <label class="field"><span>Student</span><select id="l_stu">${studs.map(s => `<option value="${s.id}" ${s.id === c.student_id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
     <div class="row"><label class="field"><span>Date</span><input type="date" id="l_d" value="${c.at.slice(0, 10)}"></label><label class="field"><span>Time</span><input type="time" id="l_t" value="${c.at.slice(11, 16)}"></label></div>
     <div class="field"><span>Outcome</span><div class="outs">${Object.entries(OUT).map(([k, o]) => `<label class="out-opt" style="--c:${o.c}"><input type="radio" name="l_o" value="${k}" ${c.outcome === k ? 'checked' : ''}><span>${o.l}</span></label>`).join('')}</div></div>
-  ${call && call.outcome === 'no-show' && !IS_ADMIN ? `<button class="btn" data-swap style="width:100%">Someone else came in instead...</button>` : ''}
+  ${call && call.outcome === 'no-show' && !TEAMV() ? `<button class="btn" data-swap style="width:100%">Someone else came in instead...</button>` : ''}
   </div>
   <div class="m-foot">${call ? '<button class="btn danger left" data-del>Delete</button>' : '<span class="left muted sm">Ctrl+Enter saves</span>'}<button class="btn" data-x>Cancel</button><button class="btn primary" data-save>Save</button></div>`, 'sm');
   $('#modal [data-swap]')?.addEventListener('click', () => openSwap(call));
@@ -2337,7 +2404,7 @@ function openSwap(call) {
 
 function openStudent(s) {
   const isNew = !s;
-  s = s || { name: '', idnum: '', period: '', classes: '', room: '', teacher: '', phone: '', email: '', every: '', school: M().students.at(-1)?.school || '', grade: '', mentor: M().students.at(-1)?.mentor || '', notes: '', active: true, flagged: false };
+  s = s || { name: '', idnum: '', period: '', classes: '', room: '', teacher: '', phone: '', email: '', every: '', school: M().students.at(-1)?.school || '', grade: '', mentor: M().students.at(-1)?.mentor || (ownView() ? adminName() : ''), notes: '', active: true, flagged: false };
   const hist = isNew ? [] : M().calls.filter(c => c.student_id === s.id).sort((a, b) => b.at.localeCompare(a.at));
   const reached = hist.filter(c => c.outcome === 'reached').length;
   const an = isNew ? null : adminNote(s);
@@ -2405,11 +2472,17 @@ function parseRoster(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return [];
   let rows = lines.map(l => l.includes('\t') ? l.split('\t') : parseCSVLine(l.trim())), map = null;
+  // title rows above the headers (e.g. a "Caseload 2026-27" banner): start at the header row
+  const hr = typeof rosterHeaderRow === 'function' ? rosterHeaderRow(rows.slice(0, 20)) : -1;
+  if (hr > 0) rows = rows.slice(hr);
   const h = rows[0].map(x => x.toLowerCase().trim());
+  let lastFirst = -1;   // a single name column written as Last, First
   if (h.some(x => /name/.test(x)) || (h.some(x => /^first/.test(x)) && h.some(x => /^last/.test(x)))) {
     map = {};
     h.forEach((x, i) => {
       if (/^(student\s*)?(full\s*)?name$|^student$/.test(x)) map.name = i;
+      else if (map.name === undefined && /name/.test(x) && /last.*first/.test(x)) { map.name = i; lastFirst = i; }
+      else if (map.name === undefined && /^(student\s*)?(full\s*)?name\b|^student\s*name/.test(x) && !/first|last|parent|guardian|teacher|mentor/.test(x)) map.name = i;
       else if (/first/.test(x)) map.first = i;
       else if (/last/.test(x)) map.last = i;
       else if (/parent|guardian|mother|father/.test(x)) { /* parent info lives on the work site, skip it */ }
@@ -2430,9 +2503,10 @@ function parseRoster(text) {
   }
   return rows.map(r => {
     const g = k => map && map[k] !== undefined ? (r[map[k]] || '').trim() : '';
-    if (map) return { name: g('name') || [g('first'), g('last')].filter(Boolean).join(' '), phone: g('phone'), email: g('email'), grade: g('grade').replace(/\D/g, ''), school: g('school'), mentor: g('mentor'), notes: [g('comments'), g('notes')].filter(Boolean).join(' · '), idnum: g('idnum'), period: g('period'), classes: g('classes'), room: g('room'), teacher: g('teacher') };
+    const nm = (v => lastFirst >= 0 && /,/.test(v) ? v.split(',').map(x => x.trim()).reverse().join(' ') : v)(g('name'));
+    if (map) return { name: nm || [g('first'), g('last')].filter(Boolean).join(' '), phone: g('phone'), email: g('email'), grade: g('grade').replace(/\D/g, ''), school: g('school'), mentor: g('mentor'), notes: [g('comments'), g('notes')].filter(Boolean).join(' · '), idnum: g('idnum'), period: g('period'), classes: g('classes'), room: g('room'), teacher: g('teacher') };
     return { name: (r[0] || '').trim(), phone: (r[1] || '').trim() };
-  }).filter(x => x.name);
+  }).filter(x => x.name && !/^(total|count|name|student|students)\b/i.test(x.name) && /[a-z]/i.test(x.name));
 }
 // a check-in log has Date + Student + Result columns
 function parseCheckins(text) {
@@ -2459,9 +2533,9 @@ function parseCheckins(text) {
 function openImport() {
   openModal(`<div class="m-head"><h2>Import roster</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
-    <p class="muted sm" style="margin:0">Paste a list from Excel / Sheets / Salesforce or pick a .csv. You can also import a check-in log (columns Date, Time, Student, Result) and it'll add the check-ins. One student per line: <b>Name, Phone</b> (phone is optional). If there's a header row it'll match Name, Grade, Student ID, Period, Class, Room, Teacher, School and Mentor columns. Parent columns get skipped.</p>
+    <p class="muted sm" style="margin:0">Paste a list from Excel / Sheets / Salesforce, or pick a .csv or a whole Excel file (its Caseload tab is used). You can also import a check-in log (columns Date, Time, Student, Result) and it'll add the check-ins. One student per line: <b>Name, Phone</b> (phone is optional). If there's a header row it'll match Name, Grade, Student ID, Period, Class, Room, Teacher, School and Mentor columns. Parent columns get skipped.</p>
     <textarea id="i_txt" style="min-height:180px;font-family:ui-monospace,monospace;font-size:12px" placeholder="Jordan Lee, 209-555-0101\nSam Patel"></textarea>
-    <div class="row"><label class="btn">Choose .csv file<input type="file" id="i_file" accept=".csv,.txt,text/csv" hidden></label><span class="muted sm" id="i_prev"></span></div>
+    <div class="row"><label class="btn">Choose a file (.csv or Excel)<input type="file" id="i_file" accept=".csv,.txt,text/csv,.xlsx" hidden></label><select id="i_tab" hidden title="Which tab of the spreadsheet"></select><span class="muted sm" id="i_prev"></span></div>
     <div class="row"><label class="field"><span>School for everyone (optional)</span><input id="i_school" value="${esc(M().students.at(-1)?.school || '')}"></label><label class="field"><span>Mentor for everyone (optional)</span><input id="i_mentor" value="${esc(M().students.at(-1)?.mentor || '')}"></label></div>
     <label class="row" style="gap:6px"><input type="checkbox" id="i_skip" checked> Skip names already on the roster</label>
   </div>
@@ -2469,7 +2543,23 @@ function openImport() {
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   const prev = () => { const r = parseRoster($('#i_txt').value); $('#i_prev').textContent = r.length ? `${r.length} student${r.length > 1 ? 's' : ''} found: ${r.slice(0, 3).map(x => x.name).join(', ')}${r.length > 3 ? '…' : ''}` : ''; };
   $('#i_txt').oninput = prev;
-  $('#i_file').onchange = async e => { const f = e.target.files[0]; if (f) { $('#i_txt').value = await f.text(); prev(); } };
+  $('#i_file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const tab = $('#i_tab'); tab.hidden = true;
+    if (/\.xlsx$/i.test(f.name)) {   // a whole spreadsheet: read its Caseload tab (or let them pick another tab)
+      let sheets;
+      try { sheets = (await readXlsxSheets(await f.arrayBuffer())).filter(sh => sh.cells.size); } catch (err) { return toast("Couldn't read that spreadsheet: " + err.message); }
+      if (!sheets.length) return toast('That spreadsheet is empty');
+      const best = caseloadSheet(sheets) || sheets.find(sh => sheetRosterTSV(sh)) || sheets[0];
+      const show = sh => { $('#i_txt').value = sheetRosterTSV(sh) || sheetRows(sh).map(r => r.join('\t')).join('\n'); prev(); };
+      tab.innerHTML = sheets.map((sh, i) => `<option value="${i}" ${sh === best ? 'selected' : ''}>Tab: ${esc(sh.name)}</option>`).join('');
+      tab.hidden = sheets.length < 2; tab.onchange = () => show(sheets[+tab.value]);
+      show(best);
+      if (!caseloadSheet(sheets) && sheets.length > 1) toast(`No "Caseload" tab in that file, so I used "${best.name}". Pick another tab if that's wrong.`, { duration: 8000 });
+      return;
+    }
+    $('#i_txt').value = await f.text(); prev();
+  };
   $('#modal [data-go]').onclick = async () => {
     const ci = parseCheckins($('#i_txt').value);
     if (ci) {
@@ -2536,7 +2626,7 @@ function exportWeekCSV(ws, we) {
 /* ======================================================================== admin: one row per mentor */
 function teamCard(ws, we) {
   const wc = Mall().calls.filter(c => { const d = c.at.slice(0, 10); return d >= ymd(ws) && d <= ymd(we); }), last = syncLastBy();
-  const names = teamNamesAll();
+  const names = schoolTeamNames();
   const cfg = syncCfg();
   let note = !syncOn() ? (window.YES_ADMIN?.test ? 'Test copy with sample data for every mentor. Sign in with the admin code to load the real team: a mentor who has synced shows their real data, everyone else stays as a sample.' : 'Not signed in.')
     : SY.err ? `<span style="color:var(--red)">Sync problem: ${esc(SY.err)}</span>` : SY.last ? `Updated at ${fmtTime(SY.last)}. Refreshes every minute.` : 'Loading the team...';
@@ -2636,6 +2726,7 @@ function syncWhen(x) {
 
 /* ---------- admin: look at one mentor's calendar, or everyone's ---------- */
 function setViewAs(name) {
+  if (name === '__me__') { if (!adminName()) return askAdminName(n => setViewAs(n)); name = adminName(); }
   S.mmentor = name || '';
   store.set('yes.viewAs.' + LS_KEY, S.mmentor);
   _mOwn = { key: null, val: null };
@@ -2644,17 +2735,30 @@ function setViewAs(name) {
 function renderViewAs() {
   if (!IS_ADMIN) return;
   document.body.classList.add('is-admin');
+  const mb = document.querySelector('.topbar .seg [data-view="mentor"]');   // admin: Mentoring is the first tab
+  if (mb && mb.previousElementSibling) mb.parentNode.prepend(mb);
   let sel = $('#viewAs');
   if (!sel) {
     sel = document.createElement('select'); sel.id = 'viewAs'; sel.className = 'view-as'; sel.title = "Whose calendar you're looking at";
     $('#whoBtn') ? $('#whoBtn').before(sel) : $('#settingsBtn')?.after(sel);
     sel.onchange = () => setViewAs(sel.value);
   }
-  const names = teamNamesAll();
+  const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option>` + names.map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
-  sel.value = S.mmentor || '';
+  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
+  // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
+  const sites = schoolSites();
+  let ss = $('#schoolAs');
+  if (sites.length > 1) {
+    if (!ss) {
+      ss = document.createElement('select'); ss.id = 'schoolAs'; ss.className = 'view-as'; ss.title = 'Which school';
+      sel.before(ss); ss.onchange = () => setSchoolView(ss.value);
+    }
+    ss.innerHTML = `<option value="">Both schools</option>` + sites.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    ss.value = S.mschool || ''; ss.classList.toggle('on', !!S.mschool);
+  } else if (ss) ss.remove();
 }
 // announcements: when looking at one mentor, only show what was sent to them
 function annVisible(ev) {
@@ -2664,8 +2768,9 @@ function annVisible(ev) {
   return [].concat(ev.ann_to).some(t => f(t) === f(S.mmentor));
 }
 
+const schoolTeamNames = () => teamNamesAll().filter(inSchool);   // the admin's school picker
 function teamNamesAll() {
-  const n = [...Mall().students.map(s => s.mentor).filter(Boolean), ...Object.keys(syncLastBy()), ...((window.YES_ADMIN && window.YES_ADMIN.sampleMentors) || []), ...((typeof SY !== 'undefined' && SY.planners) || []).map(p => p.name)];
+  const n = [...Mall().students.map(s => s.mentor).filter(Boolean), ...Object.keys(syncLastBy()), ...((window.YES_ADMIN && window.YES_ADMIN.sampleMentors) || []), ...((typeof SY !== 'undefined' && SY.planners) || []).map(p => p.name), ...(IS_ADMIN ? Object.keys(siteMap()) : [])];
   const seen = new Map(); for (const x of n) { const k = x.trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, x.trim()); }
   return [...seen.values()].sort();
 }
@@ -2673,7 +2778,7 @@ function teamNamesAll() {
 
 /* ======================================================================== admin: printable report for each mentor */
 const REPORT_SKIP = ['abel'];   // helpers, not mentors: their pull-outs count on the mentor's list
-function reportMentors() { return teamNamesAll().filter(n => !REPORT_SKIP.includes(n.trim().toLowerCase().split(/\s+/)[0]) && Mall().students.some(s => s.mentor === n)); }
+function reportMentors() { return schoolTeamNames().filter(n => !REPORT_SKIP.includes(n.trim().toLowerCase().split(/\s+/)[0]) && Mall().students.some(s => s.mentor === n)); }
 function openReport() {
   const names = reportMentors(), today = startOfDay(new Date());
   const firstCall = Mall().calls.map(c => c.at).sort()[0];
@@ -2799,7 +2904,7 @@ function reportHTML(names, a, b, label, withList) {
   <div class="bar0"><button class="alt" onclick="window.close()">Close</button><button onclick="window.print()">Print / Save as PDF</button></div>
   <div class="doc">
   <section class="page">
-    <div class="ph"><div><div class="kicker">Improve Your Tomorrow · Grace M. Davis</div><h1>Mentoring Report</h1></div><div class="pr">${e(label)}<br><span class="muted">${fmtDateShort(a)} – ${fmtDateShort(b)}</span></div></div>
+    <div class="ph"><div><div class="kicker">Improve Your Tomorrow · ${e(reportSchool())}</div><h1>Mentoring Report</h1></div><div class="pr">${e(label)}<br><span class="muted">${fmtDateShort(a)} – ${fmtDateShort(b)}</span></div></div>
     <div class="tiles">
       ${tile('Students', T.students, `${S2.length} mentor${S2.length === 1 ? '' : 's'}`)}
       ${tile('Came in', T.came, `${T.missed} didn't come in`)}
@@ -3015,15 +3120,46 @@ async function readXlsxSheets(buf) {
   }
   return sheets;
 }
+/* ---------- a workbook's Caseload tab (the mentor's student list) ---------- */
+const isCaseloadName = n => /case\s*-?\s*load/i.test(String(n || ''));
+function sheetRows(sh) {   // a tab as rows of text (tabs/newlines inside a cell become spaces)
+  const all = [...sh.cells.values()]; if (!all.length) return [];
+  const maxR = Math.max(...all.map(c => c.row)), maxC = Math.max(...all.map(c => c.col));
+  const rows = Array.from({ length: maxR + 1 }, () => Array(maxC + 1).fill(''));
+  for (const c of all) rows[c.row][c.col] = String(c.text || '').replace(/[\t\r\n]+/g, ' ').trim();
+  return rows;
+}
+// the row with the column headers: within the first 20 rows, has a name-ish header and at least one more header
+function rosterHeaderRow(rows) {
+  for (let r = 0; r < Math.min(rows.length, 20); r++) {
+    const h = rows[r].map(x => String(x || '').toLowerCase().trim());
+    const named = h.some(x => /(^|\s)(student\s*)?(full\s*)?name|^student$|^first(\s*name)?$/.test(x));
+    if (named && h.filter(Boolean).length >= 2) return r;
+  }
+  return -1;
+}
+function sheetRosterTSV(sh) {
+  const rows = sheetRows(sh), hr = rosterHeaderRow(rows); if (hr < 0) return '';
+  const used = rows[hr].map((x, i) => x ? i : -1).filter(i => i >= 0), out = [used.map(i => rows[hr][i])];
+  let blanks = 0;
+  for (let r = hr + 1; r < rows.length && blanks < 15; r++) {
+    const vals = used.map(i => rows[r][i] || '');
+    if (vals.some(Boolean)) { blanks = 0; out.push(vals); } else blanks++;
+  }
+  return out.map(r => r.join('\t')).join('\n');
+}
+const caseloadSheet = sheets => sheets.find(s => isCaseloadName(s.name)) || null;
 function analyzeXlsx(sheets) {
   const out = { mentor: '', rosterTSV: '', lines: [] };
+  const cl = caseloadSheet(sheets);   // a "Caseload" tab is the student list, whatever the other tabs have
+  if (cl) { out.rosterTSV = sheetRosterTSV(cl); out.rosterSheet = cl.name; }
   for (const sh of sheets) {
     const all = [...sh.cells.values()], at = (r, c) => sh.cells.get(r + ',' + c);
     if (!out.mentor) { const lab = all.find(c => /^mentor$/i.test(c.text.trim())); if (lab) { for (let r = lab.row + 1; r < lab.row + 4; r++) { const v = at(r, lab.col); if (v && v.text.trim()) { out.mentor = v.text.trim(); break; } } } }
     // roster
     let rosterCols = null;
     const first = all.find(c => /^first( name)?$/i.test(c.text.trim()) && all.some(d => d.row === c.row && /^last( name)?$/i.test(d.text.trim())));
-    if (first && !out.rosterTSV) {
+    if (first && (!out.rosterTSV || out.rosterSheet === sh.name)) {
       // the roster's own headers (Comments, #, First, Last...): not a month banner like "AUGUST" that shares the row
       const hdr = all.filter(c => c.row === first.row && c.col >= first.col - 2 && c.text.trim()).sort((a, b) => a.col - b.col);
       rosterCols = [hdr[0].col, hdr[hdr.length - 1].col];
@@ -3034,7 +3170,7 @@ function analyzeXlsx(sheets) {
         const vals = hdr.map(h => ((at(r, h.col) || {}).text || '').replace(/\s+/g, ' ').trim());
         if (vals.some(v => v)) { blanks = 0; rows.push(vals); } else blanks++;
       }
-      out.rosterTSV = rows.map(r => r.join('\t')).join('\n');
+      if (!out.rosterSheet) out.rosterTSV = rows.map(r => r.join('\t')).join('\n');
       out.rosterRange = { row: first.row, cols: rosterCols };
     }
     // calendar: date cells, then the cells below them in the same column
@@ -3401,7 +3537,7 @@ if (window.YES_ADMIN) {
     const m = /^calls\/(\d+)$/.exec(path || ''), isNew = path === 'calls' && method === 'POST';
     if (!isNew && !(m && (method === 'PUT' || method === 'DELETE'))) return apiLocal(method, path, body);
     const old = m ? Mall().calls.find(c => c.id === +m[1]) : null, st = stuAny(isNew ? +body.student_id : old && old.student_id);
-    if (!st || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);
+    if (!st || !st.src || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);   // the admin's own students sync like a mentor's
     const c = { ...(old || {}), ...(body || {}) };
     const req = { action: 'admin-call', student: st.name, by: st.src || '', date: String(c.at).slice(0, 10), time: String(c.at).slice(11, 16), result: c.outcome };
     if (old) { req.oldDate = old.at.slice(0, 10); req.oldTime = old.at.slice(11, 16); }
@@ -3606,10 +3742,13 @@ async function syncNow(quiet = true) {
   try {
     if (c.role === 'boss') {
       const j = await syncCall({ action: 'pull' }, c);
+      const meA = (typeof adminName === 'function' && adminName() || '').toLowerCase();
+      if (meA) j.mentors = (j.mentors || []).filter(m => m.name.toLowerCase() !== meA);   // the admin's own students live here already (not as a team copy)
       checkReload(j.reloadAt);
       let changed = false;
       const names = new Set();
       store.set(SYNC_KEY + '.last', JSON.stringify(Object.fromEntries((j.mentors || []).map(m => [m.name, m.last]))));
+      if (j.sites) { const was = JSON.stringify(SY.sites || {}); SY.sites = j.sites; SY.schoolNames = j.schools || {}; store.set('yes.sites.' + LS_KEY, JSON.stringify({ sites: j.sites, schools: j.schools || {} })); if (was !== JSON.stringify(j.sites) && IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor(); }
       // a student tagged for another mentor who syncs their own list belongs to that mentor's list only
       const own = new Set((j.mentors || []).map(m => m.name.toLowerCase()));
       const byName = new Map((j.mentors || []).map(m => [m.name.toLowerCase(), m]));
@@ -3642,6 +3781,12 @@ async function syncNow(quiet = true) {
       }
       if (!window.YES_ADMIN?.test && !window.YES_ADMIN?.baseline) for (const src of new Set(Mall().students.filter(s => s.src && !names.has(s.src)).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
       if (window.YES_ADMIN?.baseline) changed = (await loadPlanners(names)) || changed;
+      if (meA) {
+        // team copies of the admin's own students (loaded before the name was set, or on another device): make them this device's own
+        for (const src of new Set(Mall().students.filter(s => s.src && s.src.toLowerCase() === meA).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
+        if (changed) await reload();
+        await mentorSync({ ...c, name: adminName() });   // the admin's own caseload: synced like a mentor's (merged with their other devices)
+      }   // the admin's own caseload: synced like a mentor's (merged with their other devices)
       SY.last = new Date(); SY.err = '';
       if (changed) { if ($('#modalWrap').hidden && $('#popover').hidden) await reload(); else SY.reloadLater = true; }
       else if (IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor();
@@ -3683,6 +3828,7 @@ async function plannerWatch() {   // one tiny call: has the admin sent something
     if (SY.annStamp === undefined) SY.annStamp = j.annStamp;
     else if (j.annStamp !== SY.annStamp) { SY.annStamp = j.annStamp; try { await annRefresh(c); } catch (e) { console.warn('admin updates', e.message); } }
   }
+  if (j.school !== undefined && j.school !== SY.school) { SY.school = j.school; store.set('yes.school.' + LS_KEY, j.school); }   // which school my planner tab says I'm at
   if (j.dataStamp !== undefined) {   // the admin logged or changed a session for one of my students
     if (SY.dataStamp === undefined) SY.dataStamp = j.dataStamp;
     else if (j.dataStamp !== SY.dataStamp) { SY.dataStamp = j.dataStamp; setTimeout(() => syncNow(true), 0); }
@@ -3742,6 +3888,8 @@ function syncInit() {
     if (SY.timer && syncOn() && c.role !== 'boss') navigator.sendBeacon?.(c.url, new Blob([JSON.stringify({ ...syncPayload(c), code: c.code })], { type: 'text/plain' }));
   });
   document.addEventListener('click', () => { if (SY.reloadLater && $('#modalWrap').hidden && $('#popover').hidden) { SY.reloadLater = false; reload(); } }, true);
+  { const close0 = closeModal;   // data that arrived while a window was open shows as soon as it closes (not on the next click)
+    closeModal = function (...args) { const r = close0.apply(this, args); if (SY.reloadLater && $('#modalWrap').hidden && $('#popover').hidden) { SY.reloadLater = false; setTimeout(() => reload(), 0); } return r; }; }
 }
 
 function openSync() {
@@ -4148,6 +4296,30 @@ function kickedOut(oldCode) {
 }
 
 /* ---------- admin: make, reset and remove mentor passcodes ---------- */
+/* ---------- adding a mentor: find their planner Sheet tab and bring in their students and check-ins ---------- */
+function loginSchools() { const v = Object.keys((typeof SY !== 'undefined' && SY.schoolNames) || {}); return v.length ? v : ['Davis', 'Johansen']; }
+function importMsg(name, site, r) {
+  if (!r) return '';
+  if (r.error) return `Couldn't import ${name}'s planner tab: ${r.error}`;
+  if (!r.found) return `No "${name} - ${site}" tab in the planner Sheet yet. Their students come in on their own once that tab exists and they sign in (or press Import from planner).`;
+  return `Imported from "${r.tab}": ${r.students} student${r.students === 1 ? '' : 's'} and ${r.calls} check-in${r.calls === 1 ? '' : 's'}.${r.skipped ? ` ${r.skipped} check-in${r.skipped === 1 ? '' : 's'} with names not on their list were left out.` : ''}`;
+}
+async function importMentorTab(name, site) {
+  try {
+    const f = await syncCall({ action: 'planner-find', name, site });
+    if (!f || !f.found) return { found: false, site };
+    const j = await syncCall({ action: 'planner-live', name: f.name });
+    const tabs = (j.tabs || []).filter(t => !t.site || t.site === f.site);
+    if (!tabs.length) return { found: false, site };
+    const { now, newStu } = liveCheckins(tabs, []);
+    const onList = new Set(newStu.map(s => plNorm(s.name)));
+    const students = newStu.map(s => ({ name: s.name, mentor: f.name, grade: s.grade || '', idnum: '', period: s.period || '', classes: s.classes || '', room: s.room || '', teacher: s.teacher || '', active: true }));
+    const all = Object.values(now), calls = all.filter(v => onList.has(plNorm(v.name))).map(v => ({ student: v.name, date: v.date, time: PER_TIME[v.period] || '12:00', result: v.outcome === 'reached' ? 'Came in' : "Didn't come in" }));
+    if (students.length || calls.length) await syncCall({ action: 'push', name: f.name, merge: true, students, calls });   // adds to what's there, never wipes
+    if (typeof syncNow === 'function') syncNow(true);
+    return { found: true, site: f.site, tab: f.tab, students: students.length, calls: calls.length, skipped: all.length - calls.length };
+  } catch (e) { return { error: e.message, site }; }
+}
 async function openLogins(made) {
   if (!syncOn()) return toast('Sign in with the admin code first.');
   let users = [];
@@ -4157,11 +4329,13 @@ async function openLogins(made) {
   <div class="m-body">
     ${made ? `<div class="pc-card"><div class="muted sm">${made.reset ? 'New passcode' : 'Passcode'} for <b>${esc(made.name)}</b></div><div class="pc-code" id="pc_code">${esc(made.passcode)}</div>
       <div class="row" style="justify-content:center;gap:8px"><button class="btn" id="pc_copy">Copy</button></div>
-      <div class="muted sm">Give this to ${esc(made.name)}. It's only shown now. If it gets lost, just reset it.${made.reset ? ` Their old passcode stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
+      ${made.imported ? `<div class="sm" style="margin:4px 0">${esc(importMsg(made.name, made.imported.site, made.imported))}</div>` : ''}<div class="muted sm">Give this to ${esc(made.name)}. It's only shown now. If it gets lost, just reset it.${made.reset ? ` Their old passcode stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
     <p class="muted sm" style="margin:0">Each mentor signs in with their name and their own passcode, so nobody can sign in as someone else.</p>
     ${users.length ? `<div class="an-list">${users.map(u => `<div class="an-item" data-un="${esc(u.name)}"><div><b>${esc(u.name)}</b> <span class="muted sm">passcode made ${esc(syncWhen(u.made))} · ${u.devices ? `signed in on ${u.devices} device${u.devices > 1 ? 's' : ''}` : 'not signed in yet'}</span></div>
-      <span><button class="btn sm" data-ureset title="Make a new passcode. The old one stops working.">Reset passcode</button> <button class="btn sm" data-uout title="Sign them out on every computer">Sign out</button> <button class="btn sm" data-udel>Remove</button></span></div>`).join('')}</div>` : '<p class="muted">No mentor logins yet.</p>'}
-    <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn primary" id="un_go">Make passcode</button></div>
+      <span><button class="btn sm" data-uimp title="Bring in their students and check-ins from their planner Sheet tab again">Import from planner</button> <button class="btn sm" data-ureset title="Make a new passcode. The old one stops working.">Reset passcode</button> <button class="btn sm" data-uout title="Sign them out on every computer">Sign out</button> <button class="btn sm" data-udel>Remove</button></span></div>`).join('')}</div>` : '<p class="muted">No mentor logins yet.</p>'}
+    <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <select id="un_school" title="Their school: their planner tab is found and imported">${loginSchools().map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')}<option value="">No planner tab</option></select><button class="btn primary" id="un_go">Make passcode</button></div>
+    <div class="muted sm">Picking the school finds their <b>Name - School</b> tab in the planner Sheet and brings in their students and check-ins right away.</div>
     <div id="un_msg" class="muted sm"></div>
   </div>
   <div class="m-foot"><button class="btn" data-x>Done</button></div>`, 'lg');
@@ -4172,9 +4346,22 @@ async function openLogins(made) {
     const name = $('#un_name').value.trim(); if (!name) return ($('#un_msg').textContent = "Type the mentor's name.");
     const exists = users.find(u => u.name.toLowerCase() === name.toLowerCase());
     if (exists && !confirm(`${exists.name} already has a passcode. Make a new one? Their old one stops working.`)) return;
-    run({ action: 'user-new', name }, r => openLogins(r));
+    const site = $('#un_school').value;
+    run({ action: 'user-new', name }, async r => {
+      if (site) { $('#un_msg').textContent = `Looking for the "${name} - ${site}" tab...`; r.imported = await importMentorTab(name, site); }
+      openLogins(r);
+    });
   };
+  $$('#modal [data-uimp]').forEach(b => { b.onclick = async () => {
+    const n = b.closest('[data-un]').dataset.un, site = siteOf(n) || $('#un_school').value;
+    if (!site) return toast(`Pick ${n}'s school in the box at the bottom first.`);
+    b.disabled = true; b.textContent = 'Importing...';
+    const res = await importMentorTab(n, site);
+    b.disabled = false; b.textContent = 'Import from planner';
+    toast(importMsg(n, site, res), { duration: 10000 });
+  }; });
   $('#un_name').onkeydown = e => { if (e.key === 'Enter') $('#un_go').click(); };
+  if (made && made.imported) $('#un_msg').innerHTML = esc(importMsg(made.name, made.imported.site, made.imported));
   $$('#modal [data-ureset]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Reset ${n}'s passcode? Their old one stops working and they'll be signed out until they enter the new one.`)) run({ action: 'user-new', name: n }, r => openLogins(r)); }; });
   $$('#modal [data-uout]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; run({ action: 'user-signout', name: n }, () => { toast(`${n} is signed out everywhere. Their passcode still works.`); openLogins(); }); }; });
   $$('#modal [data-udel]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Remove ${n}'s login? They won't be able to sign in until you make a new passcode. Their data stays saved.`)) run({ action: 'user-del', name: n }, () => openLogins()); }; });
@@ -4514,7 +4701,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120092904';
+const BUILD_ID = '20261120104307';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
