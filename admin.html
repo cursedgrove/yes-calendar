@@ -523,6 +523,15 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .gc-box{border:1px solid var(--s1);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--mantle)}
 .gc-box ol li{margin:2px 0}
 
+.it-tabs{display:flex;gap:4px;padding:6px 0}
+.it-tabs button.on{background:var(--accent);color:var(--on-accent,#fff);border-color:var(--accent)}
+.it-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.it-card{border:1px solid var(--s1,#ddd);border-left:5px solid var(--green);border-radius:8px;padding:8px 10px}
+.it-card.warn{border-left-color:var(--peach)} .it-card.bad{border-left-color:var(--red)}
+.it-card .lbl{font-size:12px;color:var(--sub,#666)}
+.it-chk{border:1px solid var(--s1,#ddd);border-radius:8px;padding:6px 10px;margin:8px 0}
+.it-chk h4{margin:4px 0;display:flex;gap:6px;align-items:center}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -3179,10 +3188,16 @@ function liveSheet(tab) {
 }
 // what the planner tabs say: pull-outs (name, date, period, outcome) and roster students not on this calendar yet
 function liveCheckins(tabs, localNames) {
-  const now = {}, newStu = [];
+  const now = {}, newStu = [], unknown = [];
   const localMatch = makeMatcher(localNames), toLocal = n => { const k = plNorm(n), hit = localNames.find(x => plNorm(x) === k); if (hit) return hit; const r = localMatch(n); return r.found.length === 1 ? r.found[0].name : null; };
   for (const tab of tabs) {
     const a = analyzeXlsx([liveSheet(tab)]);
+    // IT's name fixes for this tab ("Eliah" means Elijah Lopez): written in before matching
+    for (const fx of tab.aliases || []) {
+      if (!fx.said || !fx.student) continue;
+      const rx = new RegExp(`(^|[^A-Za-z])${fx.said.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z])`, 'i');
+      for (const l of a.lines) if (rx.test(l.text)) l.text = l.text.replace(rx, (m0, pre) => pre + fx.student);
+    }
     const roster = a.rosterTSV ? parseRoster(a.rosterTSV) : [];
     for (const s of roster) { s.period = fixPeriod(s.period); const m = (s.notes || '').match(/^\s*([A-Z][a-z]+)['’]s\b\s*(?:·\s*)?(.*)$/); if (m) { s.mentor = m[1]; s.notes = m[2]; } }
     const theirs = new Set(roster.filter(s => s.mentor && s.mentor.toLowerCase() !== tab.name.toLowerCase()).map(s => plNorm(s.name)));   // "Isabel's" students on Daisy's tab
@@ -3192,7 +3207,8 @@ function liveCheckins(tabs, localNames) {
     const seenN = new Set(localNames.map(plNorm)), names = localNames.slice();
     for (const s of roster) { const k = plNorm(s.name); if (seenN.has(k) || rosterLocal.has(k)) continue; seenN.add(k); names.push(s.name); }
     for (const ck of planCheckins(a.lines, names).checkins) {
-      if (ck.unknown || theirs.has(plNorm(ck.name))) continue;
+      if (ck.unknown) { unknown.push({ tab: tab.name, said: ck.name, date: ck.date, outcome: ck.outcome }); continue; }
+      if (theirs.has(plNorm(ck.name))) continue;
       const name = rosterLocal.get(plNorm(ck.name)) || toLocal(ck.name) || ck.name;
       now[[plNorm(name), ck.date, ck.period || ''].join('|')] = { name, date: ck.date, period: ck.period || '', outcome: ck.outcome, roster: [...rosterLocal.values()].includes(name) };
     }
@@ -3205,7 +3221,7 @@ function liveCheckins(tabs, localNames) {
     if (vals.some(([k2, w]) => k2 !== k && w.roster && w.date === v.date && (w.period === v.period || !v.period || !w.period) && plNorm(w.name).split(' ').some(x => words.has(x)))) delete now[k];
   }
   for (const v of Object.values(now)) delete v.roster;
-  return { now, newStu };
+  return { now, newStu, unknown };
 }
 
 /* ======================================================================== team sync through a shared Google Sheet */
@@ -3228,13 +3244,37 @@ const syncSave = c => store.set(SYNC_KEY, JSON.stringify(c));
 const SY = { busy: false, timer: null, last: '', err: '', seen: new Map() };
 const syncOn = () => { const c = syncCfg(); return !!(c.url && c.on !== false && (c.role === 'boss' ? c.code : (c.token && c.name))); };
 
+// "Chrome on Windows", "Safari on iPhone"...: shown to IT next to signed-in devices and problem reports
+function deviceName() {
+  const u = navigator.userAgent;
+  const b = /Edg\//.test(u) ? 'Edge' : /OPR\//.test(u) ? 'Opera' : /Chrome\//.test(u) ? 'Chrome' : /Firefox\//.test(u) ? 'Firefox' : /Safari\//.test(u) ? 'Safari' : 'Browser';
+  const o = /iPhone/.test(u) ? 'iPhone' : /iPad/.test(u) ? 'iPad' : /Android/.test(u) ? 'Android' : /CrOS/.test(u) ? 'Chromebook' : /Windows/.test(u) ? 'Windows' : /Mac OS X/.test(u) ? 'Mac' : /Linux/.test(u) ? 'Linux' : '';
+  return o ? `${b} on ${o}` : b;
+}
+// a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
+const ERR_SENT = new Map();
+function reportError(where, err) {
+  try {
+    const message = String(err && err.message || err || '').slice(0, 300);
+    if (!message || !syncOn() || /No internet|Couldn't connect|signed out/i.test(message)) return;   // being offline isn't a bug
+    const k = where + '|' + message, now = Date.now();
+    if (now - (ERR_SENT.get(k) || 0) < 600000) return;
+    ERR_SENT.set(k, now);
+    syncCall({ action: 'log-error', where, message, device: deviceName() + ' · ' + (document.title.match(/Yes Calendar[^·]*$/) || [''])[0] }).catch(() => {});
+  } catch { /* never let reporting cause a problem */ }
+}
+addEventListener('error', e => { if (e && e.message && !/ResizeObserver|Script error/.test(e.message)) reportError('page', e.message + (e.lineno ? ` (line ${e.lineno})` : '')); });
+addEventListener('unhandledrejection', e => reportError('page', e && e.reason));
 async function syncCall(body, cfg = syncCfg()) {
   if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(cfg.url || '')) throw new Error("Couldn't connect right now. Try again in a minute.");
   let r;
   // the admin sends the admin code; a mentor sends their name + the device key from signing in
   const auth = cfg.role === 'boss' ? { code: cfg.code } : { name: cfg.name, token: cfg.token };
-  try { r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ ...auth, ...body }) }); }   // plain text body = no CORS preflight
+  // plain text body = no CORS preflight; a request that never answers gives up after 2 minutes so syncing can't get stuck
+  const ac = typeof AbortController === 'function' ? new AbortController() : null, tm = ac && setTimeout(() => ac.abort(), 120000);
+  try { r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ ...auth, ...body }), signal: ac?.signal }); }
   catch { throw new Error(navigator.onLine === false ? 'No internet right now' : "Couldn't connect. Check your internet and try again."); }
+  finally { if (tm) clearTimeout(tm); }
   let j; try { j = await r.json(); } catch { throw new Error("Couldn't connect right now. Try again in a minute."); }
   const noKey = cfg.role !== 'boss' && (j.signedOut || j.error === 'Please sign in' || j.error === 'Wrong code') && body.action !== 'login';
   if (noKey && typeof kickedOut === 'function') kickedOut(!j.signedOut);
@@ -3272,6 +3312,19 @@ async function mentorSync(c) {
   let base = null; try { base = JSON.parse(store.get(baseKey) || 'null'); } catch { base = null; }
   let remote = null;
   try { remote = await syncCall({ action: 'my-data', name: c.name }, c); } catch (e) { if (/Unknown action|Only the admin/.test(e.message)) remote = null; else throw e; }
+  if (remote && remote.ok && remote.resetAt && store.get('yes.reset.' + LS_KEY) !== remote.resetAt) {
+    // IT started a new school year: last year's pull-outs (and, if asked, students) made before then leave this calendar
+    const cut = new Date(remote.resetAt), old = x => { const t = new Date(x.created || 0); return !(t > cut); };
+    let n = 0;
+    for (const call of Mall().calls.filter(old)) { try { await api('DELETE', 'calls/' + call.id); n++; } catch { /* gone */ } }
+    for (const st of Mall().students.filter(x => !x.src)) {
+      if (remote.resetKeep !== 'rosters' && old(st)) { try { await api('DELETE', 'students/' + st.id); n++; } catch { /* gone */ } }
+      else if (st.nextAt || st.absentOn) await api('PUT', 'students/' + st.id, { ...st, nextAt: '', nextSet: '', absentOn: '' });
+    }
+    store.set('yes.reset.' + LS_KEY, remote.resetAt); store.set(baseKey, 'null'); base = null;
+    await reload();
+    if (n) toast('New school year: last year\'s pull-outs were cleared (they\'re saved in IT\'s backup).', { duration: 10000 });
+  }
   let pl = syncPayload(c);
   if (remote && remote.ok) {
     // base: what the Sheet had for each key last time (old saves only had the keys)
@@ -3359,6 +3412,8 @@ async function plannerLiveSync(c, force = false, dry = false) {
   let changed = false;
   const local = () => new Map(Mall().students.filter(s => !s.src).map(s => [plNorm(s.name), s]));
   const { now, newStu } = liveCheckins(j.tabs, [...local().values()].map(s => s.name));
+  const yr = (store.get('yes.reset.' + LS_KEY) || '').slice(0, 10);   // after a new-school-year reset, last year's planner marks stay out
+  if (yr) for (const k of Object.keys(now)) if (now[k].date < yr) delete now[k];
   plan.newStudents = newStu.map(s => s.name);
   if (newStu.length && !dry) { const r = await api('POST', 'students-import', { rows: newStu }); if (r.imported) { changed = true; await reload(); } }
   const have = local(), add = [];
@@ -3429,6 +3484,7 @@ async function syncNow(quiet = true) {
   try {
     if (c.role === 'boss') {
       const j = await syncCall({ action: 'pull' }, c);
+      checkReload(j.reloadAt);
       let changed = false;
       const names = new Set();
       store.set(SYNC_KEY + '.last', JSON.stringify(Object.fromEntries((j.mentors || []).map(m => [m.name, m.last]))));
@@ -3469,17 +3525,28 @@ async function syncNow(quiet = true) {
       else if (IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor();
       await annRefresh(c);
     } else {
-      if (LIVE_ON) try { await plannerLiveSync(c, !quiet); } catch (e) { console.warn('planner sheet', e.message); }
+      if (LIVE_ON) try { await plannerLiveSync(c, !quiet); } catch (e) { console.warn('planner sheet', e.message); reportError('planner sheet', e); }
       await mentorSync(c);
       await annRefresh(c);
-      try { await gcalRefresh(c, !quiet); } catch (e) { console.warn('google calendar', e.message); }
+      try { await gcalRefresh(c, !quiet); } catch (e) { console.warn('google calendar', e.message); reportError('google calendar', e); }
     }
     SY.last = new Date(); SY.err = '';
     if (!quiet) toast(c.role === 'boss' ? 'Up to date with the team' : 'Sent to the team sheet');
   } catch (e) {
     SY.err = e.message;
+    reportError('sync', e);
     if (!quiet) toast(e.message, { duration: 8000 });
   } finally { SY.busy = false; }
+}
+// IT pressed "Refresh everyone": reload this page to the newest version (once nothing is open)
+function checkReload(stamp) {
+  if (stamp === undefined || window.YES_ADMIN?.it) return;   // older script: no stamp at all
+  stamp = stamp || '';
+  if (SY.reloadAt === undefined) { SY.reloadAt = stamp; return; }   // first look: remember it
+  if (!stamp || stamp === SY.reloadAt) return;
+  SY.reloadAt = stamp;
+  const go = () => { if ($('#modalWrap').hidden && $('#popover').hidden) location.reload(); else setTimeout(go, 5000); };
+  toast('Updating to the newest version...'); setTimeout(go, 1500);
 }
 // every 20 seconds: ask (cheaply) whether this mentor's planner tab changed; if it did, read it now and share the result
 async function plannerWatch() {
@@ -3487,13 +3554,14 @@ async function plannerWatch() {
   const c = syncCfg(); if (c.role === 'boss') return;
   let j; try { j = await syncCall({ action: 'planner-stamp', name: c.name }, c); } catch { return; }
   if (!j || !j.ok) return;
+  checkReload(j.reloadAt);
   SY.liveWatching = !!j.watching;
   if (SY.liveStamp === undefined) { SY.liveStamp = j.stamp; return; }   // first look: the regular sync reads it anyway
   if (j.stamp === SY.liveStamp) return;
   SY.liveStamp = j.stamp;
   if (SY.busy) return;
   SY.busy = true;
-  try { if (await plannerLiveSync(c, true)) { await mentorSync(c); toast('Updated from the planner Sheet'); } } catch (e) { console.warn('planner sheet', e.message); } finally { SY.busy = false; }
+  try { if (await plannerLiveSync(c, true)) { await mentorSync(c); toast('Updated from the planner Sheet'); } } catch (e) { console.warn('planner sheet', e.message); reportError('planner sheet', e); } finally { SY.busy = false; }
 }
 /* ---------- a sound (and a desktop notification when the tab is in the background) when the admin sends something ---------- */
 let AUDIO = null;
@@ -3813,7 +3881,7 @@ function showLogin(msg) {
         syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true });
         setSessCode(remember ? '' : code);
       } else {
-        const r = await syncCall({ action: 'login', name, passcode: code }, { url, role: 'mentor' });
+        const r = await syncCall({ action: 'login', name, passcode: code, device: deviceName() }, { url, role: 'mentor' });
         who = r.name;   // the name as the admin typed it
         switchPerson(who, prev.role === 'mentor' ? prev.name : '');
         syncSave({ ...prev, url, code: '', token: remember ? r.token : '', name: who, role: 'mentor', on: true, noIds: prev.noIds !== false });
@@ -3976,25 +4044,212 @@ async function openLogins(made) {
   $$('#modal [data-udel]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Remove ${n}'s login? They won't be able to sign in until you make a new passcode. Their data stays saved.`)) run({ action: 'user-del', name: n }, () => openLogins()); }; });
 }
 
-/* ---------- IT tools: health check, cleanup, backup ---------- */
-async function openIT() {
+/* ---------- IT tools: tabs ---------- */
+const IT = { tab: 'status', health: null, ms: 0 };
+const IT_TABS = [['status', 'Status'], ['mentors', 'Mentors'], ['problems', 'Problems'], ['check', 'Data check'], ['names', 'Names'], ['compare', 'Compare'], ['accounts', 'Accounts'], ['security', 'Security'], ['maint', 'Maintenance']];
+const itAgo = iso => { if (!iso) return 'never'; const d = new Date(String(iso).replace(' ', 'T')); if (isNaN(d)) return String(iso); const m = Math.round((Date.now() - d) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+const itCall = body => syncCall(body);
+async function openIT(tab) {
   if (!syncOn()) return toast('Sign in with the IT code first.');
-  openModal(`<div class="m-head"><h2>IT tools</h2><button class="iconbtn" data-x>✕</button></div><div class="m-body"><p class="muted">Checking...</p></div>`, 'lg');
+  if (tab) IT.tab = tab;
+  openModal(`<div class="m-head"><h2>IT tools</h2><button class="iconbtn" data-x>✕</button></div>
+    <div class="seg it-tabs" style="flex-wrap:wrap;margin:0 16px">${IT_TABS.map(([k, l]) => `<button data-itab="${k}" class="${IT.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="m-body" id="it_body"><p class="muted">Checking...</p></div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  $$('#modal [data-itab]').forEach(b => { b.onclick = () => { IT.tab = b.dataset.itab; $$('#modal [data-itab]').forEach(x => x.classList.toggle('on', x === b)); itShow(); }; });
   const t0 = performance.now();
-  let st;
-  try { st = await syncCall({ action: 'it-status' }); } catch (e) { $('#modal .m-body').innerHTML = `<p style="color:var(--red)">Couldn't reach the team Sheet: ${esc(e.message)}</p>`; return; }
-  const ms = Math.round(performance.now() - t0), c = st.counts || {};
+  try { IT.health = await itCall({ action: 'it-health' }); }
+  catch (e) {
+    try { IT.health = await itCall({ action: 'it-status' }); IT.health.old = true; }   // script older than v14
+    catch (e2) { $('#it_body').innerHTML = `<p style="color:var(--red)">Couldn't reach the team Sheet: ${esc(e2.message)}</p>`; return; }
+  }
+  IT.ms = Math.round(performance.now() - t0);
+  itShow();
+}
+function itShow() {
+  const el = $('#it_body'); if (!el) return;
+  if (IT.health?.old && !['maint'].includes(IT.tab)) { el.innerHTML = `<p style="color:var(--peach)">These tools need the team script v14 (it's v${esc(IT.health.version)}). Maintenance still works.</p>`; return; }
+  ({ status: itStatusTab, mentors: itMentorsTab, problems: itProblemsTab, check: itCheckTab, names: itNamesTab, compare: itCompareTab, accounts: itAccountsTab, security: itSecurityTab, maint: () => itMaintenance(IT.health) })[IT.tab]?.(el);
+}
+const itCard = (state, label, value, note = '') => `<div class="it-card ${state}"><div class="lbl">${label}</div><b>${value}</b>${note ? `<div class="muted sm">${note}</div>` : ''}</div>`;
+function itStatusTab(el) {
+  const st = IT.health, h = st.health || {}, c = st.counts || {};
+  const bkAge = st.lastBackup ? (Date.now() - new Date(st.lastBackup.replace(' ', 'T'))) / 36e5 : 999;
+  const reads = Object.entries(h.plannerReads || {}).filter(([, v]) => v);
+  const slow = reads.filter(([, v]) => v.ms > 40000).length;
+  const gc = Object.keys(h.calendars || {}).length;
+  el.innerHTML = `<div class="it-cards">
+    ${itCard('ok', 'Connection', 'OK', `${IT.ms} ms`)}
+    ${itCard(st.version === '14' || +st.version >= 14 ? 'ok' : 'warn', 'Team script', 'v' + esc(st.version), esc(st.timeZone || ''))}
+    ${itCard(h.plannerTrigger ? 'ok' : 'bad', 'Planner Sheet alerts', h.plannerTrigger ? 'On' : 'Off', h.plannerTrigger ? 'green/red shows up in about 20 s' : 'calendars fall back to every 4 minutes')}
+    ${itCard(st.nightly ? (bkAge < 36 ? 'ok' : 'warn') : 'bad', 'Nightly backup', st.nightly ? 'On' : 'Off', st.lastBackupError ? `<span style="color:var(--red)">last try failed: ${esc(st.lastBackupError)}</span>` : 'last ' + esc(itAgo(st.lastBackup)))}
+    ${itCard(slow ? 'warn' : reads.length ? 'ok' : 'warn', 'Planner Sheet reads', reads.length ? reads.map(([n, v]) => `${esc(n)} ${Math.round(v.ms / 1000)}s`).join(' · ') : 'none yet', reads.length ? 'last read ' + reads.map(([n, v]) => `${esc(n)} ${itAgo(v.at)}`).join(', ') : '')}
+    ${itCard(h.errors24h ? 'warn' : 'ok', 'Problems (24 h)', h.errors24h || 0, h.errors24h ? '<a href="#" data-goto="problems">see the list</a>' : 'nothing reported')}
+    ${itCard('ok', 'Google Calendars', gc + ' connected', Object.keys(h.calendars || {}).map(esc).join(', '))}
+    ${itCard('ok', 'On the Sheet', `${c.Students || 0} students`, `${c['Pull-outs'] || 0} pull-outs · ${c.Logins || 0} logins · ${(h.fixes || []).length} name fixes`)}
+    ${itCard('ok', 'Last "Refresh everyone"', esc(itAgo(h.reloadAt)), h.resetAt ? 'new school year started ' + esc(itAgo(h.resetAt)) : '')}
+  </div><div class="row" style="margin-top:10px;gap:8px"><button class="btn" id="it_again">Check again</button></div>`;
+  $('#it_again').onclick = () => openIT();
+  $$('#it_body [data-goto]').forEach(a => { a.onclick = e => { e.preventDefault(); openIT(a.dataset.goto); }; });
+}
+function itMentorsTab(el) {
+  const st = IT.health, h = st.health || {};
+  const names = [...new Set([...(st.mentors || []).map(m => m.name), ...(st.users || []).map(u => u.name), ...(h.plannerMentors || [])])].sort((a, b) => a.localeCompare(b));
+  el.innerHTML = `<table class="team-tbl"><thead><tr><th>Mentor</th><th>Last sync</th><th>Planner Sheet read</th><th>Google Calendar</th><th>Devices</th><th>Last problem</th></tr></thead><tbody>
+    ${names.map(n => { const m = (st.mentors || []).find(x => x.name === n), u = (st.users || []).find(x => x.name.toLowerCase() === n.toLowerCase()), r = (h.plannerReads || {})[n], g = (h.calendars || {})[n.toLowerCase()], e = (h.lastErr || {})[n.toLowerCase()];
+      const stale = m && (Date.now() - new Date(String(m.last).replace(' ', 'T'))) > 864e5;
+      return `<tr><td><b>${esc(n)}</b></td><td>${m ? `<span style="color:${stale ? 'var(--peach)' : 'inherit'}">${esc(itAgo(m.last))}</span> <span class="muted sm">${m.students} st · ${m.calls} pull-outs</span>` : '<span class="muted">never</span>'}</td>
+        <td>${r ? `${esc(itAgo(r.at))} <span class="muted sm">${Math.round(r.ms / 1000)} s</span>` : (h.plannerMentors || []).includes(n) ? '<span class="muted">not yet</span>' : '<span class="muted">no tab</span>'}</td>
+        <td>${g ? '✓ ' + esc(g) : '<span class="muted">not connected</span>'}</td>
+        <td>${u ? u.devices : '<span class="muted">no login</span>'}</td>
+        <td>${e ? `<span class="sm" title="${esc(e.message)}">${esc(e.when)} · ${esc(e.where)}: ${esc(e.message.slice(0, 50))}</span>` : '<span class="muted">none</span>'}</td></tr>`; }).join('')}</tbody></table>
+    <div class="muted sm" style="margin-top:6px">"Last sync" turns orange after a day: that mentor's calendar hasn't been open, so planner Sheet changes aren't reaching the team Sheet.</div>`;
+}
+async function itProblemsTab(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let r; try { r = await itCall({ action: 'it-errors' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  el.innerHTML = `<div class="row" style="gap:8px;margin-bottom:8px"><span class="muted sm">Problems calendars reported (newest first). The same problem from the same person is logged at most every 10 minutes.</span><span style="flex:1"></span>${r.errors.length ? '<button class="btn sm" id="it_errclr">Clear the list</button>' : ''}</div>
+    ${r.errors.length ? `<table class="team-tbl"><thead><tr><th>When</th><th>Who</th><th>Where</th><th>Problem</th><th>Device</th></tr></thead><tbody>${r.errors.map(x => `<tr><td class="sm">${esc(x.when)}</td><td>${esc(x.who)}</td><td>${esc(x.where)}</td><td class="sm">${esc(x.message)}</td><td class="sm muted">${esc(x.device)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing reported. 🎉</p>'}`;
+  if ($('#it_errclr')) $('#it_errclr').onclick = async () => { if (!confirm('Clear the problem list?')) return; await itCall({ action: 'it-errors-clear' }); itProblemsTab(el); };
+}
+// --- data checker: looks over everything on the team Sheet
+async function itCheckTab(el) {
+  el.innerHTML = '<p class="muted">Looking over the team Sheet...</p>';
+  let d; try { d = (await itCall({ action: 'it-export' })).data; } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  const lc = x => String(x || '').trim().toLowerCase(), today = ymd(new Date());
+  const helps = {}; (d.tabs.Planners || []).forEach(r => { try { const p = JSON.parse(r[2] || '{}'); if (p.uses) helps[lc(r[0])] = lc(p.uses); } catch { /* not that row */ } });
+  const studentsBy = {}; (d.tabs.Students || []).forEach(r => { (studentsBy[lc(r[0])] ||= new Set()).add(lc(r[2])); });
+  const future = [], bad = [], orphan = [], twice = [], multi = new Map(), dupDay = [];
+  const seenDay = new Map();
+  (d.tabs['Pull-outs'] || []).forEach(r => {
+    const [by, st, date, time] = r;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad.push(r);
+    else if (date > today) future.push(r);
+    if (!(studentsBy[lc(by)] || new Set()).has(lc(st))) orphan.push(r);
+    const k = lc(by) + '|' + lc(st) + '|' + date; if (seenDay.has(k)) dupDay.push([seenDay.get(k), r]); else seenDay.set(k, r);
+  });
+  (d.tabs.Students || []).forEach(r => { const k = lc(r[2]); (multi.get(k) || multi.set(k, new Set()).get(k)).add(r[0]); });
+  for (const [name, by] of multi) { const list = [...by]; if (list.length < 2) continue; const helper = list.every(a => list.some(b => a !== b && (helps[lc(a)] === lc(b) || helps[lc(b)] === lc(a)))); if (!helper) twice.push([name, list]); }
+  const rows = (list, cols) => list.slice(0, 200).map(r => `<tr>${cols.map(i => `<td class="sm">${esc(r[i])}</td>`).join('')}</tr>`).join('');
+  const section = (id, title, list, body, fix) => `<div class="it-chk"><h4>${list.length ? '⚠️' : '✓'} ${title} <span class="muted">(${list.length})</span>${list.length && fix ? ` <button class="btn sm" data-fix="${id}">${fix}</button>` : ''}</h4>${list.length ? body : ''}</div>`;
+  el.innerHTML = `<p class="muted sm" style="margin-top:0">Checked ${(d.tabs.Students || []).length} students and ${(d.tabs['Pull-outs'] || []).length} pull-outs. Fixes take the rows off the team Sheet; mentors' calendars follow on their next sync. A backup is made every night, so a mistake can be undone from Maintenance.</p>
+    ${section('future', 'Pull-outs dated in the future', future, `<table class="team-tbl"><tbody>${rows(future, [0, 1, 2, 3, 4])}</tbody></table>`, 'Remove them')}
+    ${section('bad', 'Pull-outs with a broken date or time', bad, `<table class="team-tbl"><tbody>${rows(bad, [0, 1, 2, 3, 4])}</tbody></table>`, 'Remove them')}
+    ${section('orphan', "Pull-outs whose student isn't on that mentor's list", orphan, `<table class="team-tbl"><tbody>${rows(orphan, [0, 1, 2, 3, 4])}</tbody></table>`, 'Remove them')}
+    ${section('dupday', 'The same student twice on one day (same mentor)', dupDay, `<div class="muted sm">Sometimes real (pulled out in two periods). Check before removing.</div><table class="team-tbl"><tbody>${dupDay.slice(0, 200).map(([a, b]) => `<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${esc(a[2])}</td><td>${esc(a[3])} ${esc(a[4])}</td><td>${esc(b[3])} ${esc(b[4])}</td></tr>`).join('')}</tbody></table>`)}
+    ${section('twice', 'Students on two mentors\' lists', twice, `<div class="muted sm">Helpers working someone's students (like Abel with Daisy) are left out. Move or remove the extra copy on the student-moving site, or take it off here.</div><table class="team-tbl"><tbody>${twice.map(([n, by]) => `<tr><td>${esc(n)}</td><td>${by.map(b => `${esc(b)} <button class="linkbtn sm" data-rmstu="${esc(b)}|${esc(n)}">take off ${esc(b)}'s list</button>`).join(' · ')}</td></tr>`).join('')}</tbody></table>`)}
+    <div id="it_chkmsg" class="muted sm"></div>`;
+  const run = async (calls, students, what) => {
+    if (!confirm(`${what}?`)) return;
+    try { const r = await itCall({ action: 'it-fix', calls, students }); toast(`Removed ${r.removed.calls} pull-outs and ${r.removed.students} students from the team Sheet.`, { duration: 8000 }); itCheckTab(el); }
+    catch (e) { $('#it_chkmsg').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`; }
+  };
+  const lists = { future, bad, orphan };
+  $$('#it_body [data-fix]').forEach(b => { b.onclick = () => run(lists[b.dataset.fix].map(r => [r[0], r[1], r[2], r[3]]), [], `Take ${lists[b.dataset.fix].length} pull-outs off the team Sheet`); });
+  $$('#it_body [data-rmstu]').forEach(b => { b.onclick = () => { const [by, n] = b.dataset.rmstu.split('|'); run((d.tabs['Pull-outs'] || []).filter(r => lc(r[0]) === lc(by) && lc(r[1]) === lc(n)).map(r => [r[0], r[1], r[2], r[3]]), [[by, n]], `Take ${n} (and their pull-outs) off ${by}'s list on the team Sheet`); }; });
+}
+// --- planner Sheet: what it says for one mentor (tabs + the students on the team Sheet)
+async function itPlannerRead(name) {
+  const [lv, md] = await Promise.all([itCall({ action: 'planner-live', name }), itCall({ action: 'my-data', name })]);
+  const r = liveCheckins(lv.tabs || [], (md.students || []).map(s => s.name));
+  return { lv, md, ...r };
+}
+async function itNamesTab(el) {
+  const h = IT.health.health || {}, fixes = h.fixes || [];
+  el.innerHTML = `<p class="muted sm" style="margin-top:0">Names in the planner Sheet that the reader can't match to a student (short forms, typos). Pick who it means once; every calendar uses the fix from then on.</p>
+    <h4>Saved fixes</h4>${fixes.length ? `<div class="an-list">${fixes.map(f => `<div class="an-item"><span><b>${esc(f.said)}</b> on ${esc(f.mentor)}'s tab → ${esc(f.student)}</span><button class="btn sm" data-fxdel="${esc(f.mentor)}|${esc(f.said)}">Remove</button></div>`).join('')}</div>` : '<p class="muted sm">None yet.</p>'}
+    <h4>Find unmatched names</h4><div class="row" style="gap:6px;flex-wrap:wrap">${(h.plannerMentors || []).map(n => `<button class="btn" data-fxscan="${esc(n)}">${esc(n)}'s tab</button>`).join('')}</div>
+    <div id="it_fx" style="margin-top:8px"></div>`;
+  $$('#it_body [data-fxdel]').forEach(b => { b.onclick = async () => { const [mentor, said] = b.dataset.fxdel.split('|'); await itCall({ action: 'it-alias-del', mentor, said }); IT.health = await itCall({ action: 'it-health' }); itNamesTab(el); }; });
+  $$('#it_body [data-fxscan]').forEach(b => { b.onclick = async () => {
+    const n = b.dataset.fxscan, box = $('#it_fx'); box.innerHTML = `<p class="muted">Reading ${esc(n)}'s tab (can take 20 seconds)...</p>`;
+    try {
+      const r = await itPlannerRead(n);
+      const by = new Map(); for (const u of r.unknown) { const k = u.tab + '|' + u.said; (by.get(k) || by.set(k, []).get(k)).push(u); }
+      const studs = (r.md.students || []).map(s => s.name).sort();
+      box.innerHTML = by.size ? `<table class="team-tbl"><thead><tr><th>Written as</th><th>Tab</th><th>Dates</th><th>Means</th><th></th></tr></thead><tbody>${[...by].map(([k, list]) => { const [tb, said] = k.split('|'); return `<tr data-fx="${esc(tb)}|${esc(said)}"><td><b>${esc(said)}</b></td><td>${esc(tb)}</td><td class="sm">${list.slice(0, 6).map(u => `${fmtDateShort(parseD(u.date))} ${u.outcome === 'reached' ? '✓' : '✗'}`).join(', ')}${list.length > 6 ? ' ...' : ''}</td>
+        <td><select data-fxpick><option value="">pick a student...</option>${studs.map(x => `<option>${esc(x)}</option>`).join('')}</select></td><td><button class="btn sm" data-fxsave>Save</button></td></tr>`; }).join('')}</tbody></table>` : `<p class="muted">Every name on ${esc(n)}'s tab matches a student. ✓</p>`;
+      $$('#it_fx [data-fxsave]').forEach(btn => { btn.onclick = async () => {
+        const row = btn.closest('[data-fx]'), [mentor, said] = row.dataset.fx.split('|'), student = row.querySelector('[data-fxpick]').value;
+        if (!student) return toast('Pick the student first.');
+        await itCall({ action: 'it-alias-put', mentor, said, student }); toast(`"${said}" now means ${student}.`); row.remove(); IT.health = await itCall({ action: 'it-health' });
+      }; });
+    } catch (e) { box.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; }
+  }; });
+}
+async function itCompareTab(el) {
+  const h = IT.health.health || {};
+  el.innerHTML = `<p class="muted sm" style="margin-top:0">Puts a mentor's planner Sheet next to what their calendar has sent to the team Sheet, and shows only the differences.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap">${(h.plannerMentors || []).map(n => `<button class="btn" data-cmp="${esc(n)}">${esc(n)}</button>`).join('')}</div><div id="it_cmp" style="margin-top:10px"></div>`;
+  $$('#it_body [data-cmp]').forEach(b => { b.onclick = async () => {
+    const n = b.dataset.cmp, box = $('#it_cmp'); box.innerHTML = `<p class="muted">Reading ${esc(n)}'s planner tab and calendar (can take 20 seconds)...</p>`;
+    try {
+      const r = await itPlannerRead(n), out = v => v === 'reached' ? 'came in' : "didn't come in";
+      const sheet = new Map((r.md.calls || []).map(c => [plNorm(c.student) + '|' + c.date, c]));
+      const plan = new Map(Object.values(r.now).map(v => [plNorm(v.name) + '|' + v.date, v]));
+      const onlyPlan = [...plan].filter(([k]) => !sheet.has(k)).map(([, v]) => v), onlyCal = [...sheet].filter(([k]) => !plan.has(k)).map(([, c]) => c);
+      const differ = [...plan].filter(([k, v]) => sheet.has(k) && (/^came/i.test(sheet.get(k).result) ? 'reached' : 'no-show') !== v.outcome).map(([k, v]) => [v, sheet.get(k)]);
+      const list = (t, arr, f) => `<h4>${t} <span class="muted">(${arr.length})</span></h4>${arr.length ? `<table class="team-tbl"><tbody>${arr.sort((a, b) => (a.date || a[0].date).localeCompare(b.date || b[0].date)).slice(0, 300).map(f).join('')}</tbody></table>` : '<p class="muted sm">None ✓</p>'}`;
+      box.innerHTML = `<div class="muted sm">Planner: ${plan.size} pull-outs · Calendar/team Sheet: ${sheet.size} · same: ${plan.size - onlyPlan.length - differ.length} · unmatched names on the planner: ${r.unknown.length}</div>
+        ${list('On the planner Sheet, not on the calendar', onlyPlan, v => `<tr><td>${fmtDateShort(parseD(v.date))}</td><td>${esc(v.name)}</td><td>${out(v.outcome)}</td></tr>`)}
+        ${list('On the calendar, not on the planner Sheet', onlyCal, c => `<tr><td>${fmtDateShort(parseD(c.date))}</td><td>${esc(c.student)}</td><td>${esc(c.result)}</td></tr>`)}
+        ${list('Different result', differ, ([v, c]) => `<tr><td>${fmtDateShort(parseD(v.date))}</td><td>${esc(v.name)}</td><td>planner: ${out(v.outcome)}</td><td>calendar: ${esc(c.result)}</td></tr>`)}
+        <div class="muted sm">Pull-outs logged in the calendar itself (not in the planner) show up in the second list on purpose. Names the planner reader can't match are on the Names tab.</div>`;
+    } catch (e) { box.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; }
+  }; });
+}
+async function itAccountsTab(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let r; try { r = await itCall({ action: 'it-devices' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  const names = [...new Set((IT.health.users || []).map(u => u.name))].sort();
+  el.innerHTML = `<h4 style="margin-top:0">Signed-in devices</h4>
+    ${r.devices.length ? `<table class="team-tbl"><thead><tr><th>Mentor</th><th>Device</th><th>Signed in</th><th>Last used</th><th></th></tr></thead><tbody>${r.devices.map(d => `<tr data-dv="${esc(d.name)}|${esc(d.dev)}"><td><b>${esc(d.name)}</b></td><td>${esc(d.device)}</td><td class="sm">${esc(itAgo(d.at))}</td><td class="sm">${esc(itAgo(d.last))}</td><td><button class="btn sm" data-dvout>Sign out</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No one is signed in.</p>'}
+    <div class="muted sm">Lost phone or a shared computer: sign out just that device. The mentor's passcode keeps working everywhere else.</div>
+    <h4>Logins</h4>${names.length ? `<div class="an-list">${names.map(n => `<div class="an-item" data-acc="${esc(n)}"><b>${esc(n)}</b><span><button class="btn sm" data-accout>Sign out everywhere</button> <button class="btn sm" data-accnew>New passcode</button></span></div>`).join('')}</div>` : '<p class="muted">No logins yet.</p>'}
+    <div id="it_accmsg" class="sm" style="margin-top:6px"></div>`;
+  $$('#it_body [data-dvout]').forEach(b => { b.onclick = async () => { const [name, dev] = b.closest('[data-dv]').dataset.dv.split('|'); if (!confirm(`Sign ${name} out on this device?`)) return; try { await itCall({ action: 'it-device-out', name, dev }); toast('Signed out that device.'); itAccountsTab(el); } catch (e) { toast(e.message); } }; });
+  $$('#it_body [data-accout]').forEach(b => { b.onclick = async () => { const n = b.closest('[data-acc]').dataset.acc; if (!confirm(`Sign ${n} out on every device? Their passcode still works.`)) return; await itCall({ action: 'user-signout', name: n }); toast(`${n} is signed out everywhere.`); itAccountsTab(el); }; });
+  $$('#it_body [data-accnew]').forEach(b => { b.onclick = async () => { const n = b.closest('[data-acc]').dataset.acc; if (!confirm(`Make a new passcode for ${n}? The old one stops working and they're signed out.`)) return; const r2 = await itCall({ action: 'user-new', name: n }); $('#it_accmsg').innerHTML = `New passcode for <b>${esc(n)}</b>: <code style="font-size:16px">${esc(r2.passcode)}</code> (give it to them; it isn't shown again)`; }; });
+}
+async function itSecurityTab(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let r; try { r = await itCall({ action: 'it-security' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  const gen = () => { const w = ['river', 'maple', 'cedar', 'lumen', 'harbor', 'willow', 'aspen', 'comet', 'ember', 'quartz', 'falcon', 'meadow']; const p = () => w[crypto.getRandomValues(new Uint32Array(1))[0] % w.length]; return `${p()}-${p()}-${100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000}`; };
+  el.innerHTML = `${r.locked ? '<p style="color:var(--red)"><b>Code sign-ins are paused right now</b> (20 wrong codes in 15 minutes).</p>' : ''}
+    <h4 style="margin-top:0">Change a code</h4>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><select id="cd_which"><option value="boss">Admin code</option><option value="it">IT code</option></select><input id="cd_new" style="width:240px" placeholder="new code (10+ characters)"><button class="btn" id="cd_gen">Make one</button><button class="btn primary" id="cd_go">Change it</button></div>
+    <div class="muted sm">Whoever uses that code types the new one next time. Changing the IT code also updates this page.</div>
+    ${r.codeChanges.length ? `<div class="muted sm" style="margin-top:4px">Changed before: ${r.codeChanges.slice().reverse().map(x => `${x.which === 'it' ? 'IT' : 'admin'} ${esc(itAgo(x.at))}`).join(' · ')}</div>` : ''}
+    <h4>Wrong codes and passcodes</h4>
+    ${r.log.length ? `<table class="team-tbl"><thead><tr><th>When</th><th>What</th><th>Name typed</th><th></th></tr></thead><tbody>${r.log.map(x => `<tr><td class="sm">${esc(itAgo(x.at))}</td><td>${esc(x.what)}</td><td>${esc(x.name || '–')}</td><td class="sm" style="color:var(--red)">${esc(x.note)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No wrong tries. ✓</p>'}
+    <div class="muted sm">A few here are normal (typos). Lots in a row, or names you don't know, can mean someone is guessing.</div>`;
+  $('#cd_gen').onclick = () => { $('#cd_new').value = gen(); };
+  $('#cd_go').onclick = async () => {
+    const which = $('#cd_which').value, code = $('#cd_new').value.trim();
+    if (!confirm(`Change the ${which === 'it' ? 'IT' : 'admin'} code to "${code}"? Write it down first.`)) return;
+    try {
+      await itCall({ action: 'it-code-set', which, newCode: code });
+      if (which === 'it') { const c = syncCfg(); c.code = code; store.set(SYNC_KEY, JSON.stringify(c)); }
+      toast(`${which === 'it' ? 'IT' : 'Admin'} code changed.`, { duration: 8000 }); itSecurityTab(el);
+    } catch (e) { toast(e.message, { duration: 8000 }); }
+  };
+}
+async function itMaintenance(st) {
+  const ms = IT.ms, c = st.counts || {};
   const synced = new Set((st.mentors || []).map(m => m.name.toLowerCase()));
   const logins = new Map((st.users || []).map(u => [u.name.toLowerCase(), u]));
   const names = [...new Set([...(st.mentors || []).map(m => m.name), ...(st.users || []).map(u => u.name)])].sort((a, b) => a.localeCompare(b));
-  $('#modal .m-body').innerHTML = `
-    <div class="it-grid">
-      <div><div class="lbl">Connection</div><b style="color:var(--green)">OK</b> <span class="muted sm">${ms} ms</span></div>
-      <div><div class="lbl">Script</div><b>v${esc(st.version || '?')}</b> <span class="muted sm">${esc(st.timeZone || '')}</span></div>
-      <div><div class="lbl">This calendar</div><b>${esc(document.title)}</b> <span class="muted sm">${SY.last ? 'synced ' + fmtTime(SY.last) : ''}</span></div>
-    </div>
-    <div class="muted sm">On the Sheet: ${['Students', 'Pull-outs', 'Mentors', 'Announcements', 'Logins'].map(k => `${k} <b>${c[k] || 0}</b>`).join(' · ')}</div>
+  $('#it_body').innerHTML = `
+    <h4 style="margin:0 0 4px">Everyone's calendars</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="it_reload">Refresh everyone</button><span class="muted sm">Every open calendar and admin page reloads to the newest version within a minute (after any window they have open is closed).</span></div>
+    <h4 style="margin:14px 0 4px">Export / import everything</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="it_export">Download everything (.json)</button><label class="btn">Import a file...<input type="file" id="it_import" accept=".json" hidden></label></div>
+    <div class="muted sm">Students, pull-outs, sent events, notes, planners, Google Calendar links and name fixes (not passcodes). Importing replaces what's on the team Sheet; the current state is saved to Drive first, so it can be undone.</div>
+    <h4 style="margin:14px 0 4px">New school year</h4>
+    <div class="it-danger"><label class="row"><input type="checkbox" id="yr_keep" checked> Keep each mentor's students (just clear their pull-outs and dates)</label>
+      <div class="row" style="gap:8px;margin-top:6px"><input id="yr_confirm" placeholder='type NEW YEAR to confirm' style="width:200px"><button class="btn" id="yr_go" style="color:var(--red)">Start the new year</button></div>
+      <div class="muted sm">Saves a "year end" backup to Drive, then clears pull-outs, sent events, notes and mentors' sync info${''} on the team Sheet. Each mentor's calendar clears last year's pull-outs the next time it opens. Logins, planners, name fixes and Google Calendar links stay. Point the planner reader at next year's Sheet when it exists.</div></div>
+    <h4 style="margin:14px 0 4px">On the team Sheet</h4><div class="muted sm">${['Students', 'Pull-outs', 'Mentors', 'Announcements', 'Logins'].map(k => `${k} <b>${c[k] || 0}</b>`).join(' · ')}</div>
     <h4 style="margin:12px 0 4px">Mentors</h4>
     ${names.length ? `<table class="team-tbl"><thead><tr><th>Mentor</th><th>Login</th><th>Last synced</th><th>Students</th><th>Pull-outs</th><th></th></tr></thead><tbody>
     ${names.map(n => { const m = (st.mentors || []).find(x => x.name === n), u = logins.get(n.toLowerCase());
@@ -4026,20 +4281,36 @@ async function openIT() {
     </div>
     <div id="it_msg" class="muted sm"></div>`;
   const msg = (t, bad) => { $('#it_msg').innerHTML = bad ? `<span style="color:var(--red)">${esc(t)}</span>` : esc(t); };
+  $('#it_reload').onclick = async () => { if (!confirm('Reload every open calendar and admin page to the newest version?')) return; try { await itCall({ action: 'it-force-reload' }); toast('Sent. Open calendars reload within a minute.'); } catch (e) { msg(e.message, true); } };
+  $('#it_export').onclick = async () => { try { const r = await itCall({ action: 'it-export' }); downloadText(`Yes Calendar export ${ymd(new Date())}.json`, JSON.stringify(r.data), 'application/json'); msg('Downloaded.'); } catch (e) { msg(e.message, true); } };
+  $('#it_import').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    let data; try { data = JSON.parse(await f.text()); } catch { return msg("That file isn't readable JSON.", true); }
+    if (data && data.data && data.data.tabs) data = data.data;
+    if (!data || data.app !== 'Yes Calendar' || !data.tabs) return msg("That file isn't a Yes Calendar export or backup.", true);
+    if (prompt(`Replace the team Sheet with "${f.name}" (made ${data.made || '?'})? The current state is saved to Drive first. Type IMPORT to confirm.`) !== 'IMPORT') return msg('Import cancelled.');
+    msg('Importing...');
+    try { const r = await itCall({ action: 'it-import', data }); await reseedTeam(); toast(`Imported. Undo file in Drive: ${r.undo}`, { duration: 10000 }); openIT('maint'); } catch (err) { msg(err.message, true); }
+  };
+  $('#yr_go').onclick = async () => {
+    if ($('#yr_confirm').value.trim().toUpperCase() !== 'NEW YEAR') return msg('Type NEW YEAR in the box to confirm.', true);
+    msg('Saving a year-end backup and clearing...');
+    try { const r = await itCall({ action: 'it-year-reset', keepRosters: $('#yr_keep').checked }); await reseedTeam(); toast(`New school year started. Last year is saved in Drive: ${r.saved}`, { duration: 12000 }); openIT('maint'); } catch (err) { msg(err.message, true); }
+  };
   $$('#modal [data-itrm]').forEach(b => { b.onclick = async () => {
     const n = b.closest('[data-itn]').dataset.itn;
     if (!confirm(`Take ${n}'s synced students and pull-outs off the team Sheet?`)) return;
-    try { const r = await syncCall({ action: 'it-remove-mentor', name: n }); await reseedTeam(); toast(`Removed ${n}: ${r.removed.Students} students, ${r.removed['Pull-outs']} pull-outs.`); openIT(); } catch (e) { msg(e.message, true); }
+    try { const r = await syncCall({ action: 'it-remove-mentor', name: n }); await reseedTeam(); toast(`Removed ${n}: ${r.removed.Students} students, ${r.removed['Pull-outs']} pull-outs.`); openIT('maint'); } catch (e) { msg(e.message, true); }
   }; });
   $$('#modal [data-pldel]').forEach(b => { b.onclick = async () => {
     const n = b.closest('[data-pln]').dataset.pln;
     if (!confirm(`Delete ${n}'s planner from the Sheet?`)) return;
-    try { await syncCall({ action: 'it-planner-del', name: n }); await reseedTeam(); openIT(); } catch (e) { msg(e.message, true); }
+    try { await syncCall({ action: 'it-planner-del', name: n }); await reseedTeam(); openIT('maint'); } catch (e) { msg(e.message, true); }
   }; });
   $('#it_uses_go').onclick = async () => {
     const n = $('#it_uses_name').value.trim(), of = $('#it_uses_of').value.trim();
     if (!n || !of) return msg('Type both names, like "Abel" works with "Daisy".', true);
-    try { await syncCall({ action: 'it-planner-put', name: n, planner: { uses: of } }); toast(`${n} now gets ${of}'s students when signing in.`); openIT(); } catch (e) { msg(e.message, true); }
+    try { await syncCall({ action: 'it-planner-put', name: n, planner: { uses: of } }); toast(`${n} now gets ${of}'s students when signing in.`); openIT('maint'); } catch (e) { msg(e.message, true); }
   };
   $('#it_plfile').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -4058,16 +4329,16 @@ async function openIT() {
       const checkins = ck.checkins.filter(c => keep.has(c.name)).map(c => ({ date: c.date, time: PER[c.period] || '12:00', name: c.name, outcome: c.outcome }));
       if (!own.length) return msg("Couldn't find a student list in that file.", true);
       const r = await syncCall({ action: 'it-planner-put', name, planner: { roster: own, checkins } });
-      toast(`Saved ${r.name}'s planner: ${r.students} students, ${r.calls} pull-outs.`, { duration: 8000 }); await reseedTeam(); openIT();
+      toast(`Saved ${r.name}'s planner: ${r.students} students, ${r.calls} pull-outs.`, { duration: 8000 }); await reseedTeam(); openIT('maint');
     } catch (err) { msg("Couldn't read that file: " + err.message, true); }
   };
   if ($('#it_nightly')) $('#it_nightly').onclick = async () => {
-    try { await syncCall({ action: 'it-nightly-on' }); toast('Nightly backup is on.'); openIT(); }
+    try { await syncCall({ action: 'it-nightly-on' }); toast('Nightly backup is on.'); openIT('maint'); }
     catch (e) { msg('Couldn\'t turn it on from here (' + e.message + '). In the Apps Script editor, pick installNightlyBackup and press Run once.', true); }
   };
   if ($('#it_bknow')) $('#it_bknow').onclick = async () => {
     msg('Saving a backup...');
-    try { const r = await syncCall({ action: 'it-backup-now' }); toast('Backup saved: ' + r.name, { duration: 8000 }); openIT(); } catch (e) { msg(e.message, true); }
+    try { const r = await syncCall({ action: 'it-backup-now' }); toast('Backup saved: ' + r.name, { duration: 8000 }); openIT('maint'); } catch (e) { msg(e.message, true); }
   };
   if ($('#it_bklist')) $('#it_bklist').onclick = async () => {
     const box = $('#it_bks'); box.innerHTML = '<p class="muted sm">Loading backups...</p>';
@@ -4079,7 +4350,7 @@ async function openIT() {
         const row = btn.closest('[data-bk]'), when = row.querySelector('b').textContent;
         if (prompt(`Put the team Sheet back to how it was on ${when}?\n\nEverything synced since then is replaced (mentors' calendars send their latest again on their next sync). Type RESTORE to confirm.`) !== 'RESTORE') return msg('Restore cancelled.');
         msg('Restoring...');
-        try { const x = await syncCall({ action: 'it-restore', id: row.dataset.bk }); await reseedTeam(); toast(`Restored the Sheet to ${x.from}. The way it was just before is saved too, in case you need to undo.`, { duration: 10000 }); openIT(); }
+        try { const x = await syncCall({ action: 'it-restore', id: row.dataset.bk }); await reseedTeam(); toast(`Restored the Sheet to ${x.from}. The way it was just before is saved too, in case you need to undo.`, { duration: 10000 }); openIT('maint'); }
         catch (e) { msg(e.message, true); }
       }; });
     } catch (e) { box.innerHTML = `<p class="sm" style="color:var(--red)">${esc(e.message)}</p>`; }
@@ -4091,7 +4362,7 @@ async function openIT() {
     const what = $$('#modal .it-danger input[type=checkbox]:checked').map(x => x.value);
     if (!what.length) return msg('Check what to clear first.', true);
     if ($('#it_confirm').value.trim() !== 'CLEAR') return msg('Type CLEAR in the box to confirm.', true);
-    try { const r = await syncCall({ action: 'it-wipe', what }); SY.annSig = null; await reseedTeam(); toast(`Cleared: ${r.cleared.join(', ')}`, { duration: 8000 }); openIT(); } catch (e) { msg(e.message, true); }
+    try { const r = await syncCall({ action: 'it-wipe', what }); SY.annSig = null; await reseedTeam(); toast(`Cleared: ${r.cleared.join(', ')}`, { duration: 8000 }); openIT('maint'); } catch (e) { msg(e.message, true); }
   };
 }
 
@@ -4103,7 +4374,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119230329';
+const BUILD_ID = '20261119232235';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
