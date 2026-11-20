@@ -730,6 +730,23 @@ html,body{max-width:100%;overflow-x:hidden}
   .tp-grid{grid-template-columns:1fr}
 }
 
+/* past events stay readable: a lighter color says "past", the name stays full-strength text */
+.chip.past{opacity:1}
+.chip.past .n{color:var(--text)}
+.chip.past .dot{opacity:.55}
+.chip.allday.past{opacity:.85}
+.tev.past{opacity:1;background:color-mix(in srgb,var(--c) 24%,var(--base));color:var(--text);border-left-color:color-mix(in srgb,var(--c) 70%,var(--base))}
+.tev.past b{color:var(--text)}
+/* narrow side-by-side events: the name wraps onto two small lines instead of being cut off */
+.tev{container-type:inline-size}
+.tev .nm-short,.tev .nm-ini{display:none}
+@container (max-width:110px){
+  .tev .nm-full{display:none}.tev .nm-short{display:inline}
+  .tev b{font-size:11px;flex:1 1 100%}
+  .tev .tm{display:none}
+}
+@container (max-width:46px){ .tev .nm-short{display:none}.tev .nm-ini{display:inline}.tev b{font-size:9.5px;letter-spacing:-.4px;text-overflow:clip;margin:0 -5px;text-align:center} }
+
 </style>
 </head>
 <body>
@@ -4457,7 +4474,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120003320';
+const BUILD_ID = '20261120085446';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
@@ -4795,6 +4812,8 @@ function renderTasks() {
 }
 
 /* ======================================================================== month view */
+const shortName = t => { const m = /^((?:[A-Z][a-z][\w'.-]*)(?: [A-Z][a-z]?[\w'.-]*){1,3})( \(.*\))?$/.exec(t); return m ? m[1].replace(/ ([A-Z])[\w'.-]*$/, ' $1.') + (m[2] || '') : t; };   // Khushal Singh -> Khushal S.
+const iniName = t => shortName(t) === t ? t : t.split(' (')[0].split(' ').map(w => w[0]).join('');   // Gilbert Quintero -> GQ
 function chipHTML(o, d) {
   const ev = o.ev, c = evColor(ev), past = o.end < new Date();
   if (isAllDayish(o)) {
@@ -4904,7 +4923,7 @@ function renderTimeGrid() {
       const top = g.s * HOUR / 60, height = Math.max((g.e - g.s) * HOUR / 60 - 2, 17), w = 100 / g.ncols, ev = g.o.ev;
       const short = height < 38;
       const ck = ev.checklist?.length ? ` <span class="ck">☑${ev.checklist.filter(c => c.done).length}/${ev.checklist.length}</span>` : '';
-      cols += `<div class="tev ${short ? 'short' : ''} ${ev.status === 'free' ? 'free' : ''} ${g.o.end < now ? 'past' : ''}" data-key="${esc(g.o.key)}" style="--c:${evColor(ev)};top:${top}px;height:${height}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px)"><b>${ev.starred ? '★ ' : ''}${esc(ev.title)}${ev.rrule || ev.parent_id ? ' ↻' : ''}</b><span class="tm">${fmtTime(g.o.start)} – ${fmtTime(g.o.end)}${!short && ev.location ? '<br>' + esc(ev.location) : ''}${ck}</span><div class="rz"></div></div>`;
+      cols += `<div class="tev ${short ? 'short' : ''} ${ev.status === 'free' ? 'free' : ''} ${g.o.end < now ? 'past' : ''}" data-key="${esc(g.o.key)}" title="${esc(ev.title)} · ${fmtTime(g.o.start)}" style="--c:${evColor(ev)};top:${top}px;height:${height}px;left:calc(${g.col * w}% + 2px);width:calc(${w}% - 4px)"><b>${ev.starred ? '★ ' : ''}<span class="nm-full">${esc(ev.title)}</span><span class="nm-short">${esc(shortName(ev.title))}</span><span class="nm-ini">${esc(iniName(ev.title))}</span>${ev.rrule || ev.parent_id ? ' ↻' : ''}</b><span class="tm">${fmtTime(g.o.start)} – ${fmtTime(g.o.end)}${!short && ev.location ? '<br>' + esc(ev.location) : ''}${ck}</span><div class="rz"></div></div>`;
     }
     if (sameDay(d, now)) cols += `<div class="nowline" style="top:${minutesOf(now) * HOUR / 60}px"></div>`;
     cols += '</div>';
