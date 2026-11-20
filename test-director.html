@@ -3915,6 +3915,19 @@ const syncOn = () => { const c = syncCfg(); return !!(c.url && c.on !== false &&
 
 // "Chrome on Windows", "Safari on iPhone"...: shown to IT next to signed-in devices and problem reports
 // a random id for this browser, so IT can tell the admin's computers apart (and sign one out)
+/* A timer that keeps its pace in a background tab. Browsers slow normal timers down a lot in hidden tabs
+   (Chrome: to once a minute after 5 minutes); a tiny worker's timer isn't slowed, so the calendar stays live. */
+let BG_WORKER = null; const BG_JOBS = new Map();
+function bgEvery(ms, fn) {
+  const id = BG_JOBS.size + 1; BG_JOBS.set(id, fn);
+  try {
+    if (!BG_WORKER) {
+      BG_WORKER = new Worker(window.URL.createObjectURL(new Blob(['onmessage=e=>{const[id,ms]=e.data;setInterval(()=>postMessage(id),ms)}'], { type: 'text/javascript' })));
+      BG_WORKER.onmessage = e => { const f = BG_JOBS.get(e.data); if (f) { try { const p = f(); if (p && p.catch) p.catch(() => {}); } catch { /* the job reports its own problems */ } } };
+    }
+    BG_WORKER.postMessage([id, ms]);
+  } catch { setInterval(() => { try { fn(); } catch { /* same */ } }, ms); }   // no workers here: a normal timer
+}
 function devId() {
   let id = store.get('yes.devId');
   if (!id) { id = (crypto.getRandomValues ? [...crypto.getRandomValues(new Uint8Array(8))].map(b => (b % 36).toString(36)).join('') : Math.random().toString(36).slice(2, 10)) + Date.now().toString(36).slice(-4); store.set('yes.devId', id); }
@@ -3927,7 +3940,7 @@ function deviceName() {
   return o ? `${b} on ${o}` : b;
 }
 // a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
-const YES_BUILD = '202611202221';   // filled in when the pages are built
+const YES_BUILD = '202611202232';   // filled in when the pages are built
 const ERR_SENT = new Map();
 function reportError(where, err) {
   try {
@@ -4273,7 +4286,7 @@ function checkReload(stamp) {
 /* ---------- the admin calendar: settings IT set for it, and noticing IT signed this computer out ---------- */
 async function adminWatch() {
   if (!syncOn() || !['admin', 'admintest', 'director'].includes(loginMode()) || SY.confOff || SY.confBusy) return;
-  if (Date.now() - (SY.confAt || 0) < (document.hidden ? 120000 : 30000)) return;   // every 30 s is plenty
+  if (Date.now() - (SY.confAt || 0) < 30000) return;   // every 30 s is plenty (background tabs too)
   SY.confAt = Date.now(); SY.confBusy = true;
   let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
   if (j && j.ok && j.name !== undefined) {
@@ -4308,7 +4321,7 @@ async function plannerWatch() {   // one tiny call: has the admin sent something
     if (SY.dataStamp === undefined) SY.dataStamp = j.dataStamp;
     else if (j.dataStamp !== SY.dataStamp) { SY.dataStamp = j.dataStamp; setTimeout(() => syncNow(true), 0); }
   }
-  if (!LIVE_ON || SY.busy || document.hidden) return;
+  if (!LIVE_ON || SY.busy) return;   // keeps going in a background tab too
   SY.liveWatching = !!j.watching;
   if (SY.liveStamp === undefined) { SY.liveStamp = j.stamp; return; }   // first look: the regular sync reads it anyway
   if (j.stamp === SY.liveStamp) return;
@@ -4351,9 +4364,12 @@ function syncInit() {
     return r;
   };
   setTimeout(() => syncNow(), 1500);
-  setInterval(() => { if (!document.hidden) syncNow(); }, 60000);                   // boss: every minute; mentor: a safety resend
-  const watchLoop = async () => { await plannerWatch(); await adminWatch(); setTimeout(watchLoop, document.hidden ? 30000 : 10000); };   // every 10 s (30 s in a background tab)
+  bgEvery(60000, () => syncNow());                                                   // boss: every minute; mentor: a safety resend (background tabs too)
+  let watching = false;
+  const watchLoop = async () => { if (watching) return; watching = true; try { await plannerWatch(); await adminWatch(); } finally { watching = false; } };
+  bgEvery(10000, watchLoop);   // every 10 s, even when this tab is in the background
   setTimeout(watchLoop, 4000);
+  addEventListener('online', () => watchLoop());   // back online: catch up right away
   addEventListener('visibilitychange', () => { if (!document.hidden) plannerWatch(); });
   setInterval(() => { if (!SY.annWatch && document.hidden && syncOn() && syncCfg().role !== 'boss') annRefresh().catch(() => {}); }, 60000);   // older team script: background tab still hears about admin updates
   addEventListener('focus', () => syncNow());
@@ -5347,7 +5363,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120142117';
+const BUILD_ID = '20261120143250';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
