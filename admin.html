@@ -919,10 +919,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 let STORAGE_OK = true;
 
 const nextFriday = () => { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + (5 - t.getDay() + 7) % 7)); };
-const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, gradeFix2: true, goalFix3: true, goalFix4: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
+const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, gradeFix2: true, goalFix3: true, goalFix4: true, goalFix5: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
 function gradeFix(st) {
   if (!st.goalFix3) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix3 = true; }   // IYT goal: 10 students in a day
-  if (!st.goalFix4) { st.countMode = 'attempts'; st.goalFix4 = true; }   // the goal is 10 students pulled out a day, whether or not each came in
+  st.goalFix4 = true;
+  if (!st.goalFix5) { st.countMode = 'reached'; st.goalFix5 = true; }   // the goal is 10 students who came in a day (no-shows don't count)
   // an "I did them" pressed early (Nov 14 - Dec 7) didn't really finish a round: back to the last real one
   st.gradeFix2 = true;
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
@@ -960,7 +961,7 @@ function fixMentor(m) {
   const d = MENTOR_DEF();
   if (!m || typeof m !== 'object') return d;
   return dedupeMentor({ students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
-    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3), goalFix4: !!(m.settings && m.settings.goalFix4), gradeFix2: !!(m.settings && m.settings.gradeFix2) }) });
+    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3), goalFix4: !!(m.settings && m.settings.goalFix4), goalFix5: !!(m.settings && m.settings.goalFix5), gradeFix2: !!(m.settings && m.settings.gradeFix2) }) });
 }
 
 /* Modesto City Schools 2026-2027 academic calendar (dates for 9-12 / all grades). Starred = red "important" dates. */
@@ -1032,7 +1033,7 @@ function seedLists(lists) {
       db.mentor.calls.push({ id: db.nextId++, student_id: s.id, at: `${c.date}T${c.time}`, method: 'in-person', contact: 'student', outcome: c.outcome, notes: '', created: stamp() });
     }
   }
-  db.mentor.settings = { dailyGoal: 10, weeklyGoal: 50, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix3: true, goalFix4: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] };
+  db.mentor.settings = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, goalFix3: true, goalFix4: true, goalFix5: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] };
   return db;
 }
 const SEED_LISTS = [];
@@ -1730,7 +1731,7 @@ const OUT = {
 };
 const METHODS = { 'in-person': 'Pulled from class' };
 const CONTACTS = { student: 'Student' };
-const MDEF = { dailyGoal: 10, weeklyGoal: 50, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
+const MDEF = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
 
 const IS_ADMIN = !!window.YES_ADMIN;
 const Mall = () => S.mentor || { students: [], calls: [], grades: [], settings: {} };
@@ -1806,7 +1807,7 @@ const mset = () => {
   return st;
 };
 const countsGoal = c => mset().countMode === 'reached' ? c.outcome === 'reached' : true;
-// toward the goal: each student counts once a day (a no-show then a came-in later the same day is one student)
+// toward the goal: each student counts once a day (coming in twice the same day is still one student)
 const goalN = calls => new Set(calls.filter(countsGoal).map(c => c.student_id + '|' + c.at.slice(0, 10))).size;
 const countsDone = c => mset().doneMode === 'any' ? true : c.outcome === 'reached';
 const callsOn = d => M().calls.filter(c => c.at.slice(0, 10) === ymd(d));
@@ -4474,7 +4475,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120002958';
+const BUILD_ID = '20261120003320';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
