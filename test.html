@@ -2454,11 +2454,17 @@ function parseRoster(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return [];
   let rows = lines.map(l => l.includes('\t') ? l.split('\t') : parseCSVLine(l.trim())), map = null;
+  // title rows above the headers (e.g. a "Caseload 2026-27" banner): start at the header row
+  const hr = typeof rosterHeaderRow === 'function' ? rosterHeaderRow(rows.slice(0, 20)) : -1;
+  if (hr > 0) rows = rows.slice(hr);
   const h = rows[0].map(x => x.toLowerCase().trim());
+  let lastFirst = -1;   // a single name column written as Last, First
   if (h.some(x => /name/.test(x)) || (h.some(x => /^first/.test(x)) && h.some(x => /^last/.test(x)))) {
     map = {};
     h.forEach((x, i) => {
       if (/^(student\s*)?(full\s*)?name$|^student$/.test(x)) map.name = i;
+      else if (map.name === undefined && /name/.test(x) && /last.*first/.test(x)) { map.name = i; lastFirst = i; }
+      else if (map.name === undefined && /^(student\s*)?(full\s*)?name\b|^student\s*name/.test(x) && !/first|last|parent|guardian|teacher|mentor/.test(x)) map.name = i;
       else if (/first/.test(x)) map.first = i;
       else if (/last/.test(x)) map.last = i;
       else if (/parent|guardian|mother|father/.test(x)) { /* parent info lives on the work site, skip it */ }
@@ -2479,9 +2485,10 @@ function parseRoster(text) {
   }
   return rows.map(r => {
     const g = k => map && map[k] !== undefined ? (r[map[k]] || '').trim() : '';
-    if (map) return { name: g('name') || [g('first'), g('last')].filter(Boolean).join(' '), phone: g('phone'), email: g('email'), grade: g('grade').replace(/\D/g, ''), school: g('school'), mentor: g('mentor'), notes: [g('comments'), g('notes')].filter(Boolean).join(' · '), idnum: g('idnum'), period: g('period'), classes: g('classes'), room: g('room'), teacher: g('teacher') };
+    const nm = (v => lastFirst >= 0 && /,/.test(v) ? v.split(',').map(x => x.trim()).reverse().join(' ') : v)(g('name'));
+    if (map) return { name: nm || [g('first'), g('last')].filter(Boolean).join(' '), phone: g('phone'), email: g('email'), grade: g('grade').replace(/\D/g, ''), school: g('school'), mentor: g('mentor'), notes: [g('comments'), g('notes')].filter(Boolean).join(' · '), idnum: g('idnum'), period: g('period'), classes: g('classes'), room: g('room'), teacher: g('teacher') };
     return { name: (r[0] || '').trim(), phone: (r[1] || '').trim() };
-  }).filter(x => x.name);
+  }).filter(x => x.name && !/^(total|count|name|student|students)\b/i.test(x.name) && /[a-z]/i.test(x.name));
 }
 // a check-in log has Date + Student + Result columns
 function parseCheckins(text) {
@@ -2508,9 +2515,9 @@ function parseCheckins(text) {
 function openImport() {
   openModal(`<div class="m-head"><h2>Import roster</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
-    <p class="muted sm" style="margin:0">Paste a list from Excel / Sheets / Salesforce or pick a .csv. You can also import a check-in log (columns Date, Time, Student, Result) and it'll add the check-ins. One student per line: <b>Name, Phone</b> (phone is optional). If there's a header row it'll match Name, Grade, Student ID, Period, Class, Room, Teacher, School and Mentor columns. Parent columns get skipped.</p>
+    <p class="muted sm" style="margin:0">Paste a list from Excel / Sheets / Salesforce, or pick a .csv or a whole Excel file (its Caseload tab is used). You can also import a check-in log (columns Date, Time, Student, Result) and it'll add the check-ins. One student per line: <b>Name, Phone</b> (phone is optional). If there's a header row it'll match Name, Grade, Student ID, Period, Class, Room, Teacher, School and Mentor columns. Parent columns get skipped.</p>
     <textarea id="i_txt" style="min-height:180px;font-family:ui-monospace,monospace;font-size:12px" placeholder="Jordan Lee, 209-555-0101\nSam Patel"></textarea>
-    <div class="row"><label class="btn">Choose .csv file<input type="file" id="i_file" accept=".csv,.txt,text/csv" hidden></label><span class="muted sm" id="i_prev"></span></div>
+    <div class="row"><label class="btn">Choose a file (.csv or Excel)<input type="file" id="i_file" accept=".csv,.txt,text/csv,.xlsx" hidden></label><select id="i_tab" hidden title="Which tab of the spreadsheet"></select><span class="muted sm" id="i_prev"></span></div>
     <div class="row"><label class="field"><span>School for everyone (optional)</span><input id="i_school" value="${esc(M().students.at(-1)?.school || '')}"></label><label class="field"><span>Mentor for everyone (optional)</span><input id="i_mentor" value="${esc(M().students.at(-1)?.mentor || '')}"></label></div>
     <label class="row" style="gap:6px"><input type="checkbox" id="i_skip" checked> Skip names already on the roster</label>
   </div>
@@ -2518,7 +2525,23 @@ function openImport() {
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   const prev = () => { const r = parseRoster($('#i_txt').value); $('#i_prev').textContent = r.length ? `${r.length} student${r.length > 1 ? 's' : ''} found: ${r.slice(0, 3).map(x => x.name).join(', ')}${r.length > 3 ? '…' : ''}` : ''; };
   $('#i_txt').oninput = prev;
-  $('#i_file').onchange = async e => { const f = e.target.files[0]; if (f) { $('#i_txt').value = await f.text(); prev(); } };
+  $('#i_file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const tab = $('#i_tab'); tab.hidden = true;
+    if (/\.xlsx$/i.test(f.name)) {   // a whole spreadsheet: read its Caseload tab (or let them pick another tab)
+      let sheets;
+      try { sheets = (await readXlsxSheets(await f.arrayBuffer())).filter(sh => sh.cells.size); } catch (err) { return toast("Couldn't read that spreadsheet: " + err.message); }
+      if (!sheets.length) return toast('That spreadsheet is empty');
+      const best = caseloadSheet(sheets) || sheets.find(sh => sheetRosterTSV(sh)) || sheets[0];
+      const show = sh => { $('#i_txt').value = sheetRosterTSV(sh) || sheetRows(sh).map(r => r.join('\t')).join('\n'); prev(); };
+      tab.innerHTML = sheets.map((sh, i) => `<option value="${i}" ${sh === best ? 'selected' : ''}>Tab: ${esc(sh.name)}</option>`).join('');
+      tab.hidden = sheets.length < 2; tab.onchange = () => show(sheets[+tab.value]);
+      show(best);
+      if (!caseloadSheet(sheets) && sheets.length > 1) toast(`No "Caseload" tab in that file, so I used "${best.name}". Pick another tab if that's wrong.`, { duration: 8000 });
+      return;
+    }
+    $('#i_txt').value = await f.text(); prev();
+  };
   $('#modal [data-go]').onclick = async () => {
     const ci = parseCheckins($('#i_txt').value);
     if (ci) {
@@ -3079,15 +3102,46 @@ async function readXlsxSheets(buf) {
   }
   return sheets;
 }
+/* ---------- a workbook's Caseload tab (the mentor's student list) ---------- */
+const isCaseloadName = n => /case\s*-?\s*load/i.test(String(n || ''));
+function sheetRows(sh) {   // a tab as rows of text (tabs/newlines inside a cell become spaces)
+  const all = [...sh.cells.values()]; if (!all.length) return [];
+  const maxR = Math.max(...all.map(c => c.row)), maxC = Math.max(...all.map(c => c.col));
+  const rows = Array.from({ length: maxR + 1 }, () => Array(maxC + 1).fill(''));
+  for (const c of all) rows[c.row][c.col] = String(c.text || '').replace(/[\t\r\n]+/g, ' ').trim();
+  return rows;
+}
+// the row with the column headers: within the first 20 rows, has a name-ish header and at least one more header
+function rosterHeaderRow(rows) {
+  for (let r = 0; r < Math.min(rows.length, 20); r++) {
+    const h = rows[r].map(x => String(x || '').toLowerCase().trim());
+    const named = h.some(x => /(^|\s)(student\s*)?(full\s*)?name|^student$|^first(\s*name)?$/.test(x));
+    if (named && h.filter(Boolean).length >= 2) return r;
+  }
+  return -1;
+}
+function sheetRosterTSV(sh) {
+  const rows = sheetRows(sh), hr = rosterHeaderRow(rows); if (hr < 0) return '';
+  const used = rows[hr].map((x, i) => x ? i : -1).filter(i => i >= 0), out = [used.map(i => rows[hr][i])];
+  let blanks = 0;
+  for (let r = hr + 1; r < rows.length && blanks < 15; r++) {
+    const vals = used.map(i => rows[r][i] || '');
+    if (vals.some(Boolean)) { blanks = 0; out.push(vals); } else blanks++;
+  }
+  return out.map(r => r.join('\t')).join('\n');
+}
+const caseloadSheet = sheets => sheets.find(s => isCaseloadName(s.name)) || null;
 function analyzeXlsx(sheets) {
   const out = { mentor: '', rosterTSV: '', lines: [] };
+  const cl = caseloadSheet(sheets);   // a "Caseload" tab is the student list, whatever the other tabs have
+  if (cl) { out.rosterTSV = sheetRosterTSV(cl); out.rosterSheet = cl.name; }
   for (const sh of sheets) {
     const all = [...sh.cells.values()], at = (r, c) => sh.cells.get(r + ',' + c);
     if (!out.mentor) { const lab = all.find(c => /^mentor$/i.test(c.text.trim())); if (lab) { for (let r = lab.row + 1; r < lab.row + 4; r++) { const v = at(r, lab.col); if (v && v.text.trim()) { out.mentor = v.text.trim(); break; } } } }
     // roster
     let rosterCols = null;
     const first = all.find(c => /^first( name)?$/i.test(c.text.trim()) && all.some(d => d.row === c.row && /^last( name)?$/i.test(d.text.trim())));
-    if (first && !out.rosterTSV) {
+    if (first && (!out.rosterTSV || out.rosterSheet === sh.name)) {
       // the roster's own headers (Comments, #, First, Last...): not a month banner like "AUGUST" that shares the row
       const hdr = all.filter(c => c.row === first.row && c.col >= first.col - 2 && c.text.trim()).sort((a, b) => a.col - b.col);
       rosterCols = [hdr[0].col, hdr[hdr.length - 1].col];
@@ -3098,7 +3152,7 @@ function analyzeXlsx(sheets) {
         const vals = hdr.map(h => ((at(r, h.col) || {}).text || '').replace(/\s+/g, ' ').trim());
         if (vals.some(v => v)) { blanks = 0; rows.push(vals); } else blanks++;
       }
-      out.rosterTSV = rows.map(r => r.join('\t')).join('\n');
+      if (!out.rosterSheet) out.rosterTSV = rows.map(r => r.join('\t')).join('\n');
       out.rosterRange = { row: first.row, cols: rosterCols };
     }
     // calendar: date cells, then the cells below them in the same column
@@ -4588,7 +4642,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120100800';
+const BUILD_ID = '20261120103434';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
