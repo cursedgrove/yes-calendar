@@ -3495,6 +3495,31 @@ async function plannerWatch() {
   SY.busy = true;
   try { if (await plannerLiveSync(c, true)) { await mentorSync(c); toast('Updated from the planner Sheet'); } } catch (e) { console.warn('planner sheet', e.message); } finally { SY.busy = false; }
 }
+/* ---------- a sound (and a desktop notification when the tab is in the background) when the admin sends something ---------- */
+let AUDIO = null;
+const annSoundOn = () => store.get('yes.annSound') !== 'off';
+function unlockAudio() {   // browsers only allow sound after the person has clicked or typed on the page once
+  try { AUDIO = AUDIO || new (window.AudioContext || window.webkitAudioContext)(); if (AUDIO.state === 'suspended') AUDIO.resume(); } catch { AUDIO = null; }
+}
+addEventListener('pointerdown', unlockAudio, { passive: true });
+addEventListener('keydown', unlockAudio);
+function chime() {
+  unlockAudio(); if (!AUDIO) return;
+  const t = AUDIO.currentTime + 0.02;
+  [[784, 0], [1047, 0.15], [1319, 0.3]].forEach(([f, d]) => {   // three soft rising notes
+    const o = AUDIO.createOscillator(), g = AUDIO.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.22, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.6);
+    o.connect(g).connect(AUDIO.destination); o.start(t + d); o.stop(t + d + 0.65);
+  });
+}
+function annAlert(items) {
+  if (annSoundOn()) chime();
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    const x = items[0];
+    try { const n = new Notification(items.length > 1 ? `${items.length} new updates from your admin` : 'New from your admin', { body: items.map(y => y.title).join(' · ').slice(0, 180), tag: 'yes-ann-' + x.id }); n.onclick = () => { focus(); n.close(); }; } catch { /* ignore */ }
+  }
+}
 function syncSoon() { if (!syncOn() || syncCfg().role === 'boss') return; clearTimeout(SY.timer); SY.timer = setTimeout(() => syncNow(), 4000); }
 function syncInit() {
   const raw = api;
@@ -3506,6 +3531,7 @@ function syncInit() {
   setTimeout(() => syncNow(), 1500);
   setInterval(() => { if (!document.hidden) syncNow(); }, 60000);                   // boss: every minute; mentor: a safety resend
   setInterval(() => { plannerWatch(); }, 20000);
+  setInterval(() => { if (document.hidden && syncOn() && syncCfg().role !== 'boss') annRefresh().catch(() => {}); }, 60000);   // tab in the background: still hear about admin updates
   addEventListener('focus', () => syncNow());
   addEventListener('online', () => syncNow());
   addEventListener('beforeunload', () => {
@@ -3566,9 +3592,14 @@ async function annRefresh(c = syncCfg()) {
   if (sig === SY.annSig) return;
   SY.annSig = sig;
   const r = await api('POST', 'ann-sync', { items: SY.ann, label: boss ? 'Sent to team' : 'From admin', admin: boss });
+  const ids = new Set(SY.ann.map(x => String(x.id))), fresh = SY.annIds ? SY.ann.filter(x => !SY.annIds.has(String(x.id))) : [];
+  SY.annIds = ids;
   if (r.changed) {
     if ($('#modalWrap').hidden && $('#popover').hidden) await reload(); else SY.reloadLater = true;
-    if (!boss && SY.annSeen) toast('New update from your admin. It\'s on your calendar.', { duration: 8000 });
+    if (!boss && SY.annSeen) {
+      toast('New update from your admin. It\'s on your calendar.', { duration: 8000 });
+      if (fresh.length) annAlert(fresh);
+    }
   }
   SY.annSeen = true;
 }
@@ -3674,6 +3705,12 @@ if (typeof openSettings === 'function' && !IS_ADMIN) {
     const c = syncCfg();
     if (!syncOn() || c.role === 'boss') return;
     const body = $('#modal .m-body'); if (!body) return;
+    body.insertAdjacentHTML('afterbegin', `<div class="gc-box"><h3 style="margin:0 0 6px">Updates from your admin</h3>
+      <label class="row" style="gap:8px"><input type="checkbox" id="an_sound" ${annSoundOn() ? 'checked' : ''}> Play a sound when my admin sends something</label>
+      <div class="row" style="margin-top:6px;gap:8px"><button class="btn sm" id="an_test">Test sound</button>${'Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied' ? '<button class="btn sm" id="an_notif">Also show a pop-up when this tab is in the background</button>' : ''}</div></div>`);
+    $('#an_sound').onchange = e => { store.set('yes.annSound', e.target.checked ? 'on' : 'off'); if (e.target.checked) chime(); };
+    $('#an_test').onclick = () => chime();
+    $('#an_notif') && ($('#an_notif').onclick = async () => { await Notification.requestPermission(); openSettings(); });
     body.insertAdjacentHTML('afterbegin', gcalSettingsHTML()); gcalBind();
     if (!SY.gcal) gcalRefresh(c, true).then(() => { const box = $('#gcBox'); if (box) { box.outerHTML = gcalSettingsHTML(); gcalBind(); } }).catch(() => {});
   };
@@ -4066,7 +4103,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119223016';
+const BUILD_ID = '20261119230329';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
