@@ -1756,6 +1756,7 @@ const Mall = () => S.mentor || { students: [], calls: [], grades: [], settings: 
 // "Own" = students with no mentor set, or with this mentor's name. Students another mentor owns
 // (like "Isabel's" kids on Daisy's planner) stay saved but aren't shown or counted.
 function myMentor() {
+  if (IS_ADMIN) return ownView() ? adminName() : '';
   // whoever signed in is who this calendar belongs to
   // (unless nobody on the list has that name and they aren't helping anyone: then go by the list, like before)
   try {
@@ -1803,6 +1804,26 @@ function setSchoolView(site) {
   S.mschool = site || ''; store.set('yes.schoolView.' + LS_KEY, S.mschool);
   if (S.mmentor && !inSchool(S.mmentor)) { S.mmentor = ''; store.set('yes.viewAs.' + LS_KEY, ''); }
   _mOwn = { key: null, val: null }; renderViewAs(); render();
+}
+/* ---------- the admin's own caseload: "My students" in the mentor picker ---------- */
+const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
+const adminName = () => (IS_ADMIN && store.get(ADMIN_ME_KEY())) || '';
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const ownView = () => IS_ADMIN && !!adminName() && sameName(S.mmentor, adminName());
+const TEAMV = () => IS_ADMIN && !ownView();   // the admin looking at the team (not their own students)
+function askAdminName(then) {
+  openModal(`<div class="m-head"><h2>Your own students</h2><button class="x" data-x>×</button></div>
+  <div class="m-body"><p class="muted">Log your own mentoring sessions here like a mentor does. Your students and sessions go on the team Sheet under this name, so they show up on the scoreboard and in reports.</p>
+  <label class="field"><span>Your name (as it should show on the team list)</span><input id="am_name" value="${esc(adminName())}" placeholder="e.g. Ms. Lopez" maxlength="40"></label></div>
+  <div class="m-foot"><button class="btn" data-x>Cancel</button><button class="btn primary" id="am_go">Save</button></div>`, 'sm');
+  const go = () => {
+    const n = $('#am_name').value.trim().replace(/\s+/g, ' ');
+    if (!n) return $('#am_name').focus();
+    if (schoolTeamNames().some(x => sameName(x, n) && !sameName(x, adminName())) && !confirm(`${n} is already a mentor on the team list. Use the same name anyway? Their students and yours would mix.`)) return;
+    store.set(ADMIN_ME_KEY(), n); closeModal(); then && then(n);
+  };
+  $('#am_go').onclick = go; $('#am_name').onkeydown = e => { if (e.key === 'Enter') go(); };
+  setTimeout(() => $('#am_name')?.focus(), 50);
 }
 let _mOwn = { key: null, val: null };
 const M = () => {
@@ -1852,7 +1873,7 @@ function teamGoal(who) {
 }
 const mset = () => {
   const st = { ...MDEF, ...M().settings };
-  if (!st.goalCustom) {
+  if (!st.goalCustom && !ownView()) {   // the admin's own students use the Goals settings (10 a day unless changed)
     let who = '';
     try { who = IS_ADMIN ? (S.mmentor || '') : myMentor(); } catch { who = ''; }
     // helping someone (Abel with Daisy's students): their goal comes along
@@ -2034,7 +2055,7 @@ function renderMentor() {
   const away = awayList(M().students, M().calls), awayIds = new Map(away.map(x => [x.s.id, x]));
 
   const phoneLinks = s => s.phone ? `<a href="${telHref(s.phone)}" title="Call">${esc(s.phone)}</a>` : '';
-  const acts = s => IS_ADMIN ? `<div class="ms-acts"><button data-q="reached" title="Log a session for ${esc(s.mentor || 'their mentor')}">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>` : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
+  const acts = s => TEAMV() ? `<div class="ms-acts"><button data-q="reached" title="Log a session for ${esc(s.mentor || 'their mentor')}">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>` : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
   const needRow = s => {
     const tries = (wk.get(s.id) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), lr = lastCall(s.id, c => c.outcome === 'reached');
     const lt = tries[tries.length - 1];
@@ -2055,12 +2076,12 @@ function renderMentor() {
 
   const h = `<div class="mentor">
     <div class="m-toolbar">
-      <input id="mq" placeholder="${IS_ADMIN ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
+      <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">Both schools</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN && mentors.length > 1 ? `<select id="mmentor"><option value="">All mentors</option>${mentors.map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${IS_ADMIN ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2068,10 +2089,10 @@ function renderMentor() {
       <button class="btn" data-mact="csv" title="Download this week's check-ins as a spreadsheet">Export week</button>
     </div>
     ${M().students.length && isCur ? quickBar('main') : ''}
-    ${!M().students.length && IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
-    ${!M().students.length && !IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
+    ${!M().students.length && TEAMV() ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
+    ${!M().students.length && !TEAMV() ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
     ${weekClosures.map(c => `<div class="m-closed"><b>IYT room closed</b> ${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}. No pull-outs those days; anyone due then moves to the next open day.</div>`).join('')}
-    ${IS_ADMIN ? teamCard(ws, we) : ''}
+    ${TEAMV() ? teamCard(ws, we) : ''}
     <div class="m-stats">
       <div class="m-stat">${hasGoal ? ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)') : ''}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span>` : ''}</div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : !hasGoal ? 'came in today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
       <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more to go`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
@@ -2087,13 +2108,14 @@ function renderMentor() {
       <div class="m-list"><h3><span>${st.openDays === 0 ? 'Still due (room closed this week)' : 'Due this week'} <span class="muted">(${need.length})</span></span></h3>${need.map(needRow).join('') || `<div class="m-empty">${active.length ? (q ? 'No matches' : 'Nobody else is due this week.') : 'No students yet'}</div>`}</div>
       <div class="m-list"><h3><span>Up to date <span class="muted">(${done.length})</span></span></h3>${done.map(doneRow).join('') || '<div class="m-empty">Nobody yet</div>'}</div>
     </div>
-    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts">${c.outcome === 'no-show' && !IS_ADMIN ? '<button data-mswap title="Someone else came in instead">Swap</button>' : ''}<button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
+    <div class="m-list m-log"><h3><span>This week's check-ins <span class="muted">(${log.length})</span></span></h3>${log.map(c => { const s = stuById(c.student_id); return `<div class="ms-row" data-cid="${c.id}"><span class="muted sm">${DAYS[parseD(c.at).getDay()]} ${fmtTime(parseD(c.at))}</span><div class="ms-info" data-medit><b>${esc(s?.name || 'Removed student')}</b><div class="sub"><span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span></div></div><div class="ms-acts">${c.outcome === 'no-show' && !TEAMV() ? '<button data-mswap title="Someone else came in instead">Swap</button>' : ''}<button data-medit>Edit</button><button data-mdel>Delete</button></div></div>`; }).join('') || '<div class="m-empty">Nothing logged this week</div>'}</div>
   </div>`;
   $('#main').innerHTML = h;
   const root = $('.mentor');
   const mq = $('#mq');
   mq.oninput = () => { S.mq = mq.value; const pos = mq.selectionStart; renderMentor(); const n = $('#mq'); n.focus(); n.setSelectionRange(pos, pos); };
   $('#mmentor')?.addEventListener('change', e => setViewAs(e.target.value));
+
   $('#mschool')?.addEventListener('change', e => setSchoolView(e.target.value));
   $('#mhelp')?.addEventListener('change', e => setHelp(e.target.value));
   root.onclick = async e => {
@@ -2118,7 +2140,7 @@ function renderMentor() {
     if (qb && sid) { if (isCur) return quickLog(sid, qb.dataset.q); return openLog({ sid, preset: { outcome: qb.dataset.q, at: ymd(ws) + 'T12:00' } }); }
     if (e.target.closest('[data-absent]') && sid) return markAbsent(sid);
     if (e.target.closest('[data-mlog]') && sid) return openLog({ sid, preset: isCur ? {} : { at: ymd(ws) + 'T12:00' } });
-    if (e.target.closest('[data-mstu]') && sid) return IS_ADMIN ? openDueCard(stuById(sid)) : openStudent(stuById(sid));
+    if (e.target.closest('[data-mstu]') && sid) return TEAMV() ? openDueCard(stuById(sid)) : openStudent(stuById(sid));
     const crow = e.target.closest('[data-cid]'), cid = crow ? +crow.dataset.cid : null;
     if (cid && e.target.closest('[data-mdel]')) return deleteCall(cid);
     if (cid && e.target.closest('[data-mswap]')) return openSwap(M().calls.find(c => c.id === cid));
@@ -2260,7 +2282,7 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
     <label class="field"><span>Student</span><select id="l_stu">${studs.map(s => `<option value="${s.id}" ${s.id === c.student_id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
     <div class="row"><label class="field"><span>Date</span><input type="date" id="l_d" value="${c.at.slice(0, 10)}"></label><label class="field"><span>Time</span><input type="time" id="l_t" value="${c.at.slice(11, 16)}"></label></div>
     <div class="field"><span>Outcome</span><div class="outs">${Object.entries(OUT).map(([k, o]) => `<label class="out-opt" style="--c:${o.c}"><input type="radio" name="l_o" value="${k}" ${c.outcome === k ? 'checked' : ''}><span>${o.l}</span></label>`).join('')}</div></div>
-  ${call && call.outcome === 'no-show' && !IS_ADMIN ? `<button class="btn" data-swap style="width:100%">Someone else came in instead...</button>` : ''}
+  ${call && call.outcome === 'no-show' && !TEAMV() ? `<button class="btn" data-swap style="width:100%">Someone else came in instead...</button>` : ''}
   </div>
   <div class="m-foot">${call ? '<button class="btn danger left" data-del>Delete</button>' : '<span class="left muted sm">Ctrl+Enter saves</span>'}<button class="btn" data-x>Cancel</button><button class="btn primary" data-save>Save</button></div>`, 'sm');
   $('#modal [data-swap]')?.addEventListener('click', () => openSwap(call));
@@ -2377,7 +2399,7 @@ function openSwap(call) {
 
 function openStudent(s) {
   const isNew = !s;
-  s = s || { name: '', idnum: '', period: '', classes: '', room: '', teacher: '', phone: '', email: '', every: '', school: M().students.at(-1)?.school || '', grade: '', mentor: M().students.at(-1)?.mentor || '', notes: '', active: true, flagged: false };
+  s = s || { name: '', idnum: '', period: '', classes: '', room: '', teacher: '', phone: '', email: '', every: '', school: M().students.at(-1)?.school || '', grade: '', mentor: M().students.at(-1)?.mentor || (ownView() ? adminName() : ''), notes: '', active: true, flagged: false };
   const hist = isNew ? [] : M().calls.filter(c => c.student_id === s.id).sort((a, b) => b.at.localeCompare(a.at));
   const reached = hist.filter(c => c.outcome === 'reached').length;
   const an = isNew ? null : adminNote(s);
@@ -2676,6 +2698,7 @@ function syncWhen(x) {
 
 /* ---------- admin: look at one mentor's calendar, or everyone's ---------- */
 function setViewAs(name) {
+  if (name === '__me__') { if (!adminName()) return askAdminName(n => setViewAs(n)); name = adminName(); }
   S.mmentor = name || '';
   store.set('yes.viewAs.' + LS_KEY, S.mmentor);
   _mOwn = { key: null, val: null };
@@ -2694,8 +2717,8 @@ function renderViewAs() {
   }
   const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option>` + names.map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
-  sel.value = S.mmentor || '';
+  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
 }
 // announcements: when looking at one mentor, only show what was sent to them
@@ -3444,7 +3467,7 @@ if (window.YES_ADMIN) {
     const m = /^calls\/(\d+)$/.exec(path || ''), isNew = path === 'calls' && method === 'POST';
     if (!isNew && !(m && (method === 'PUT' || method === 'DELETE'))) return apiLocal(method, path, body);
     const old = m ? Mall().calls.find(c => c.id === +m[1]) : null, st = stuAny(isNew ? +body.student_id : old && old.student_id);
-    if (!st || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);
+    if (!st || !st.src || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);   // the admin's own students sync like a mentor's
     const c = { ...(old || {}), ...(body || {}) };
     const req = { action: 'admin-call', student: st.name, by: st.src || '', date: String(c.at).slice(0, 10), time: String(c.at).slice(11, 16), result: c.outcome };
     if (old) { req.oldDate = old.at.slice(0, 10); req.oldTime = old.at.slice(11, 16); }
@@ -3649,6 +3672,8 @@ async function syncNow(quiet = true) {
   try {
     if (c.role === 'boss') {
       const j = await syncCall({ action: 'pull' }, c);
+      const meA = (typeof adminName === 'function' && adminName() || '').toLowerCase();
+      if (meA) j.mentors = (j.mentors || []).filter(m => m.name.toLowerCase() !== meA);   // the admin's own students live here already (not as a team copy)
       checkReload(j.reloadAt);
       let changed = false;
       const names = new Set();
@@ -3686,6 +3711,12 @@ async function syncNow(quiet = true) {
       }
       if (!window.YES_ADMIN?.test && !window.YES_ADMIN?.baseline) for (const src of new Set(Mall().students.filter(s => s.src && !names.has(s.src)).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
       if (window.YES_ADMIN?.baseline) changed = (await loadPlanners(names)) || changed;
+      if (meA) {
+        // team copies of the admin's own students (loaded before the name was set, or on another device): make them this device's own
+        for (const src of new Set(Mall().students.filter(s => s.src && s.src.toLowerCase() === meA).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
+        if (changed) await reload();
+        await mentorSync({ ...c, name: adminName() });   // the admin's own caseload: synced like a mentor's (merged with their other devices)
+      }   // the admin's own caseload: synced like a mentor's (merged with their other devices)
       SY.last = new Date(); SY.err = '';
       if (changed) { if ($('#modalWrap').hidden && $('#popover').hidden) await reload(); else SY.reloadLater = true; }
       else if (IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor();
@@ -4559,7 +4590,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120094241';
+const BUILD_ID = '20261120095454';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
