@@ -579,6 +579,12 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .ov-acts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
 .ov-recent{font-size:12.5px;display:flex;flex-direction:column;gap:2px;border-top:1px solid color-mix(in srgb,var(--text) 12%,transparent);padding-top:6px}
 .chip{font-size:11px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.ov-msg{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.ov-msg textarea{width:100%;resize:vertical}
+.ov-cur{padding:6px 10px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);border-radius:6px}
+.ov-ctl{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:13px}
+.ov-ctl label{display:flex;gap:4px;align-items:center;white-space:nowrap}
+#dirMsgBar{position:sticky;top:0;z-index:61;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:6px 12px;background:color-mix(in srgb,var(--accent) 22%,var(--bg));color:var(--text);font-size:13.5px;border-bottom:1px solid color-mix(in srgb,var(--accent) 45%,transparent)}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1889,7 +1895,9 @@ function siteOf(name) {
   const hit = e.find(([n]) => n.toLowerCase() === k) || e.find(([n]) => n.toLowerCase().split(/\s+/)[0] === k.split(/\s+/)[0]);
   return hit ? hit[1] : '';
 }
-const schoolSites = () => { siteMap(); return [...new Set([...Object.values(siteMap()), ...Object.keys((typeof SY !== 'undefined' && SY.schoolNames) || {})])].sort(); };   // schools with mentors + every school the admin added
+const myScope = () => { if (!window.YES_ADMIN || window.YES_ADMIN.it) return null; const s = syncCfg().schools; return Array.isArray(s) && s.length ? s : null; };   // schools the director gave this admin
+function applyScope() { const sc = myScope(); if (!sc || typeof S === 'undefined') return; if (S.mschool && !sc.includes(S.mschool)) S.mschool = ''; if (sc.length === 1 && S.mschool !== sc[0]) setSchoolView(sc[0]); }
+const schoolSites = () => { siteMap(); const sc = myScope(); return [...new Set([...Object.values(siteMap()), ...Object.keys((typeof SY !== 'undefined' && SY.schoolNames) || {})])].filter(x => !sc || sc.includes(x)).sort(); };   // schools with mentors + every school the admin added (only theirs, if the director set some)
 const inSchool = name => !S.mschool || siteOf(name) === S.mschool;
 function mySchool() {   // for a mentor's own calendar: the school their planner tab says
   const v = (typeof SY !== 'undefined' && SY.school) || store.get('yes.school.' + LS_KEY) || '';
@@ -1973,11 +1981,20 @@ function otherMentors() {
 }
 // pull-out goals per mentor (Daisy: 10 students a day). Mentors not listed have no goal, unless they set one under Goals.
 const TEAM_GOALS = { daisy: { dailyGoal: 10, weeklyGoal: 50 } };
+// goals the director set for each mentor (Overview → Goals) win over the built-in ones
+function setGoals(g) { if (typeof SY === 'undefined') return; const s = JSON.stringify(g || {}); if (s === JSON.stringify(SY.goals || null)) return; SY.goals = g || {}; store.set('yes.goals.' + LS_KEY, s); }
+function dirGoal(who) {
+  let g = (typeof SY !== 'undefined' && SY.goals) || null;
+  if (!g) { try { g = JSON.parse(store.get('yes.goals.' + LS_KEY) || '{}'); if (typeof SY !== 'undefined') SY.goals = g; } catch { g = {}; } }
+  const k = String(who || '').trim().toLowerCase(), f = k.split(/\s+/)[0], ks = Object.keys(g);
+  const hit = ks.find(n => n.toLowerCase() === k) || ks.find(n => n.toLowerCase().split(/\s+/)[0] === f);
+  return hit ? { dailyGoal: +g[hit].d || 0, weeklyGoal: +g[hit].w || 0 } : null;
+}
 function teamGoal(who) {
   const f = x => String(x || '').trim().toLowerCase().split(/\s+/)[0];
-  if (who) return TEAM_GOALS[f(who)] || { dailyGoal: 0, weeklyGoal: 0 };
+  if (who) return dirGoal(who) || TEAM_GOALS[f(who)] || { dailyGoal: 0, weeklyGoal: 0 };
   // admin looking at everyone: add up the mentors' goals
-  let d = 0, w = 0; for (const n of (typeof schoolTeamNames === 'function' ? schoolTeamNames() : [])) { const g = TEAM_GOALS[f(n)]; if (g) { d += g.dailyGoal; w += g.weeklyGoal; } }
+  let d = 0, w = 0; for (const n of (typeof schoolTeamNames === 'function' ? schoolTeamNames() : [])) { const g = dirGoal(n) || TEAM_GOALS[f(n)]; if (g) { d += g.dailyGoal; w += g.weeklyGoal; } }
   return { dailyGoal: d, weeklyGoal: w };
 }
 const mset = () => {
@@ -1986,7 +2003,7 @@ const mset = () => {
     let who = '';
     try { who = IS_ADMIN ? (S.mmentor || '') : myMentor(); } catch { who = ''; }
     // helping someone (Abel with Daisy's students): their goal comes along
-    if (!IS_ADMIN && typeof helpView === 'function' && helpView() && !TEAM_GOALS[String(who).toLowerCase().split(/\s+/)[0]]) who = helpView();
+    if (!IS_ADMIN && typeof helpView === 'function' && helpView() && !dirGoal(who) && !TEAM_GOALS[String(who).toLowerCase().split(/\s+/)[0]]) who = helpView();
     Object.assign(st, teamGoal(who));
   }
   return st;
@@ -2923,6 +2940,8 @@ function setViewAs(name) {
 }
 function renderViewAs() {
   if (!IS_ADMIN) return;
+  const sc = myScope();   // an admin the director put on certain schools
+  if (sc) { if (sc.length === 1 && S.mschool !== sc[0]) { S.mschool = sc[0]; store.set('yes.schoolView.' + LS_KEY, S.mschool); } else if (S.mschool && !sc.includes(S.mschool)) S.mschool = ''; }
   document.body.classList.add('is-admin');
   const mb = document.querySelector('.topbar .seg [data-view="mentor"]');   // admin: Mentoring is the first tab
   if (mb && mb.previousElementSibling) mb.parentNode.prepend(mb);
@@ -3120,7 +3139,7 @@ const OV = { tab: 'progress', school: '', who: '', what: '' };
 async function openOverview(tab) {
   if (tab) OV.tab = tab;
   openModal(`<div class="m-head"><h2>Overview</h2><button class="iconbtn" data-x>✕</button></div>
-    <div class="seg it-tabs">${[['progress', 'Progress'], ['admins', 'Admins'], ['activity', 'Activity']].map(([k, l]) => `<button data-ovt="${k}" class="${OV.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="seg it-tabs">${[['progress', 'Progress'], ['admins', 'Admins'], ['goals', 'Goals'], ['schools', 'Schools'], ['activity', 'Activity']].map(([k, l]) => `<button data-ovt="${k}" class="${OV.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="m-body" id="ov_body"><p class="muted">Loading...</p></div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   $$('#modal [data-ovt]').forEach(b => { b.onclick = () => { OV.tab = b.dataset.ovt; $$('#modal [data-ovt]').forEach(x => x.classList.toggle('on', x === b)); ovShow(); }; });
@@ -3133,7 +3152,7 @@ async function ovData(fresh) {
 function ovShow() {
   const el = $('#ov_body'); if (!el) return;
   el.dataset.tab = OV.tab;
-  ({ progress: ovProgress, admins: ovAdmins, activity: ovActivity })[OV.tab](el);
+  ({ progress: ovProgress, admins: ovAdmins, goals: ovGoals, schools: ovSchools, activity: ovActivity })[OV.tab](el);
 }
 // per mentor, week by week: students who came in (each student once a day), against the goal
 function ovMentorStats(n, weeks) {
@@ -3194,22 +3213,70 @@ async function ovAdmins(el) {
   const wk = ymd(addDays(new Date(), -7)), thisWk = ymd(startOfWeek(new Date()));
   const roleTxt = { main: 'Main admin', admin: 'Admin', director: 'Director' };
   const PL = { sessions: 'sessions', send: 'Send to team', notes: 'notes', logins: 'logins', own: 'own students' };
-  el.innerHTML = `<p class="muted sm" style="margin-top:0">Each admin, when they last used the calendar, what they did in the last 7 days, and their own students. "Activity" has the full list.</p>
+  const SCH = Object.keys(d.schools || {}).sort(), schName = k => (d.schools[k] || k).replace(/ High School$/, '');
+  const m = d.msg, others = d.admins.filter(a => a.role !== 'director');
+  el.innerHTML = `<div class="card ov-msg"><b>Message to the admins</b>
+      ${m ? `<div class="ov-cur"><div>${esc(m.text)}</div><div class="muted sm">Posted ${esc(m.at)} by ${esc(m.from)} · to ${m.to === 'all' ? 'every admin' : esc(m.to.join(', '))}</div></div>` : '<div class="muted sm">No message up right now. It shows as a bar at the top of each admin\'s calendar until they press Got it.</div>'}
+      <textarea id="ov_mt" rows="2" placeholder="Ex: Please have everyone's grade check-ins in by Friday." maxlength="600"></textarea>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><span class="muted sm">To:</span>${others.map(a => `<label class="sm"><input type="checkbox" data-mto="${esc(a.name)}" checked> ${esc(a.name)}</label>`).join('')}
+        <span style="flex:1"></span><button class="btn primary sm" id="ov_mpost">Post message</button>${m ? '<button class="btn sm" id="ov_mclear">Take it down</button>' : ''}</div></div>
+    <p class="muted sm">Each admin: which schools they look after, what they can do, when they last used the calendar, what they did in the last 7 days and their own students.</p>
     <div class="ov-admins">${d.admins.map(a => {
       const mine = d.activity.filter(x => x.who === a.name), recent = mine.filter(x => x.at.slice(0, 10) >= wk), by = {};
       recent.forEach(x => { by[x.what] = (by[x.what] || 0) + 1; });
-      const listName = a.role === 'main' ? 'Admin' : a.name, isMe = sameName(listName, adminName());
+      const listName = a.role === 'main' ? 'Admin' : a.name, isMe = sameName(listName, adminName()), self = sameName(a.name, syncCfg().adminWho);
       const st = Mall().students.filter(s => sameName(s.src || s.mentor, listName) && s.active !== false), ids = new Set(st.map(s => s.id));
       const cameWk = new Set(Mall().calls.filter(c => ids.has(c.student_id) && c.outcome === 'reached' && c.at.slice(0, 10) >= thisWk).map(c => c.student_id + c.at.slice(0, 10))).size;
-      return `<div class="card ov-admin"><div class="row" style="justify-content:space-between;gap:8px"><div><b>${esc(a.name)}</b> <span class="chip">${roleTxt[a.role] || 'Admin'}</span></div><span class="muted sm">${a.last ? 'last used ' + esc(a.last) : 'not seen yet'}${a.computers ? ` · ${a.computers} computer${a.computers === 1 ? '' : 's'}` : ''}</span></div>
-        <div class="muted sm">Can: ${a.perms == null ? 'everything' : a.perms.length ? esc(a.perms.map(p => PL[p] || p).join(', ')) : 'look only'}</div>
+      const sc = a.schools || [];
+      return `<div class="card ov-admin" data-ova="${esc(a.name)}"><div class="row" style="justify-content:space-between;gap:8px"><div><b>${esc(a.name)}</b> <span class="chip">${roleTxt[a.role] || 'Admin'}</span></div><span class="muted sm">${a.last ? 'last used ' + esc(a.last) : 'not seen yet'}${a.computers ? ` · ${a.computers} computer${a.computers === 1 ? '' : 's'}` : ''}</span></div>
+        ${a.role === 'director' ? '<div class="muted sm">Sees every school.</div>' : `<div class="ov-ctl"><span class="muted sm">Schools:</span>${SCH.map(k => `<label><input type="checkbox" data-osch="${esc(k)}" ${sc.includes(k) ? 'checked' : ''}> ${esc(schName(k))}</label>`).join('')}<span class="muted sm">${sc.length ? '' : '(none ticked = every school)'}</span></div>`}
+        ${a.perms == null ? '<div class="muted sm">Can: everything (uses the admin code)</div>' : a.role === 'director' ? `<div class="muted sm">Can: ${a.perms.length ? esc(a.perms.map(p => PL[p] || p).join(', ')) : 'look only'}</div>` : `<div class="ov-ctl"><span class="muted sm">Can:</span>${(d.permList || []).map(([k, l]) => `<label title="${esc(l)}"><input type="checkbox" data-operm="${k}" ${a.perms.includes(k) ? 'checked' : ''}> ${esc(PL[k] || k)}</label>`).join('')}</div>`}
+        ${a.role === 'director' ? '' : `<div class="row" style="gap:6px"><button class="btn sm primary" data-oasave>Save</button>${self ? '' : '<button class="btn sm" data-oaout>Sign out</button>'}</div>`}
         <div class="ov-acts">${Object.keys(by).length ? Object.entries(by).map(([k, v]) => `<span><b>${v}</b> ${esc(k)}</span>`).join('') : '<span class="muted">Nothing changed in the last 7 days</span>'}</div>
         ${st.length ? `<div class="row" style="gap:8px;flex-wrap:wrap"><span>${st.length} own student${st.length === 1 ? '' : 's'} · ${cameWk} came in this week</span><button class="btn sm" data-ovsee="${esc(isMe ? '__me__' : listName)}">See their students</button></div>` : ''}
         ${mine.length ? `<div class="ov-recent">${mine.slice(0, 3).map(x => `<div><span class="muted sm">${esc(x.at)}</span> ${esc(x.what)}: ${esc(x.detail)}</div>`).join('')}</div>` : ''}
         <button class="linkbtn sm" data-ovwho="${esc(a.name)}">All of ${esc(a.name.split(' ')[0])}'s activity →</button></div>`;
     }).join('')}</div>`;
+  const redo = () => { OV.data = null; ovAdmins(el); };
+  const call = async (body, msg) => { try { await syncCall(body); toast(msg); redo(); } catch (e) { toast(e.message); } };
+  $('#ov_mpost').onclick = () => { const text = $('#ov_mt').value.trim(); if (!text) return toast('Type the message'); const to = $$('#ov_body [data-mto]:checked').map(x => x.dataset.mto); if (!to.length) return toast('Pick who gets it'); call({ action: 'dir-msg-set', text, to: to.length === others.length ? 'all' : to }, 'Posted. Admins see it within about 30 seconds.'); };
+  if ($('#ov_mclear')) $('#ov_mclear').onclick = () => call({ action: 'dir-msg-set', text: '' }, 'Message taken down.');
+  $$('#ov_body [data-ova]').forEach(card => {
+    const n = card.dataset.ova, sv = card.querySelector('[data-oasave]'), out = card.querySelector('[data-oaout]');
+    if (sv) sv.onclick = () => { const body = { action: 'dir-admin-set', name: n, schools: [...card.querySelectorAll('[data-osch]:checked')].map(x => x.dataset.osch) }; const pb = card.querySelectorAll('[data-operm]'); if (pb.length) body.perms = [...pb].filter(x => x.checked).map(x => x.dataset.operm); call(body, `Saved. ${n.split(' ')[0]}'s calendar updates within about 30 seconds.`); };
+    if (out) out.onclick = () => { if (confirm(`Sign ${n} out on every computer? They sign in again with their code.`)) call({ action: 'dir-admin-out', name: n }, `${n} is signed out.`); };
+  });
   $$('#ov_body [data-ovsee]').forEach(b => { b.onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs(b.dataset.ovsee); }; });
   $$('#ov_body [data-ovwho]').forEach(b => { b.onclick = () => { OV.who = b.dataset.ovwho; OV.what = ''; openOverview('activity'); }; });
+}
+async function ovGoals(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let d; try { d = await ovData(); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab !== 'goals') return;
+  const names = [...new Set([...(d.mentors || []).map(m => m.name), ...teamNamesAll().filter(n => Mall().students.some(s => s.mentor === n))])].filter(n => !sameName(n, 'Admin')).sort();
+  const site = n => (d.mentors || []).find(m => sameName(m.name, n))?.site || siteOf(n) || '';
+  const SCH = [...new Set(names.map(site))].sort(), g = d.goals || {};
+  const cur = n => { const k = Object.keys(g).find(x => sameName(x, n)); return k ? g[k] : TEAM_GOALS[n.toLowerCase().split(/\s+/)[0]] ? { d: TEAM_GOALS[n.toLowerCase().split(/\s+/)[0]].dailyGoal, w: TEAM_GOALS[n.toLowerCase().split(/\s+/)[0]].weeklyGoal } : null; };
+  el.innerHTML = `<p class="muted sm" style="margin-top:0">Pull-out goals for each mentor: students who come in, each counted once a day. They show on the mentor's own calendar (Today / Week rings and the goal streak), on the admin pages and in Progress. Blank = no goal.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="muted sm">Everyone:</span><input type="number" min="0" id="ovg_d" placeholder="daily" style="width:80px"><input type="number" min="0" id="ovg_w" placeholder="weekly" style="width:90px"><button class="btn sm" id="ovg_all">Fill in for all</button><button class="linkbtn sm" id="ovg_5">Weekly = 5 × daily</button></div>
+    ${SCH.map(sc => `<div class="card"><h4 style="margin:0 0 6px">${esc(sc ? schoolFull(sc) : 'Other')}</h4><table class="team-tbl"><thead><tr><th>Mentor</th><th>Daily goal</th><th>Weekly goal</th></tr></thead><tbody>
+      ${names.filter(n => site(n) === sc).map(n => { const c = cur(n); return `<tr data-ovg="${esc(n)}"><td>${esc(n)}</td><td><input type="number" min="0" max="999" data-gd value="${c && c.d ? c.d : ''}" style="width:80px"></td><td><input type="number" min="0" max="9999" data-gw value="${c && c.w ? c.w : ''}" style="width:90px"></td></tr>`; }).join('')}</tbody></table></div>`).join('')}
+    <div class="row" style="gap:8px;margin-top:8px"><button class="btn primary" id="ovg_save">Save goals</button><span class="muted sm">Mentors' calendars pick them up within about 10 seconds.</span></div>`;
+  $('#ovg_all').onclick = () => { $$('#ov_body [data-ovg]').forEach(tr => { if ($('#ovg_d').value !== '') tr.querySelector('[data-gd]').value = $('#ovg_d').value; if ($('#ovg_w').value !== '') tr.querySelector('[data-gw]').value = $('#ovg_w').value; }); };
+  $('#ovg_5').onclick = () => { $$('#ov_body [data-ovg]').forEach(tr => { const v = +tr.querySelector('[data-gd]').value; if (v) tr.querySelector('[data-gw]').value = v * 5; }); };
+  $('#ovg_save').onclick = async () => {
+    const goals = {}; $$('#ov_body [data-ovg]').forEach(tr => { const dd = +tr.querySelector('[data-gd]').value || 0, ww = +tr.querySelector('[data-gw]').value || 0; if (dd || ww) goals[tr.dataset.ovg] = { d: dd, w: ww }; });
+    try { const j = await syncCall({ action: 'dir-goals-set', goals }); setGoals(j.goals); OV.data = null; toast('Goals saved.'); render(); ovGoals(el); } catch (e) { toast(e.message); }
+  };
+}
+/* a message the director posted: a bar at the top of the admin's calendar until they press Got it */
+function renderDirMsg() {
+  let bar = $('#dirMsgBar'); const m = typeof SY !== 'undefined' && SY.dirMsg;
+  const seen = store.get('yes.dirMsgSeen.' + LS_KEY);
+  if (!m || seen === m.id || window.YES_ADMIN?.it) { bar?.remove(); return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'dirMsgBar'; document.body.prepend(bar); }
+  bar.innerHTML = `<span><b>${esc(m.from)}:</b> ${esc(m.text)}</span><button class="btn sm" id="dirMsgOk">Got it</button>`;
+  $('#dirMsgOk').onclick = () => { store.set('yes.dirMsgSeen.' + LS_KEY, m.id); bar.remove(); };
 }
 async function ovActivity(el) {
   el.innerHTML = '<p class="muted">Loading...</p>';
@@ -3227,6 +3294,33 @@ async function ovActivity(el) {
   $('#ov_what').onchange = e => { OV.what = e.target.value; ovActivity(el); };
   $('#ov_ref').onclick = async () => { OV.data = null; ovActivity(el); };
   $('#ov_acsv').onclick = () => downloadText(`admin-activity-${ymd(new Date())}.csv`, [['When', 'Who', 'What', 'Details'], ...list.map(x => [x.at, x.who, x.what, x.detail])].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
+}
+
+/* Overview → Schools: the director and IT add, rename or remove schools.
+   A mentor belongs to a school through their planner Sheet tab name: "Name - School". */
+async function ovSchools(el, note = '') {
+  if (!note) el.innerHTML = '<p class="muted">Loading...</p>';
+  let r; try { r = await syncCall({ action: 'school-list' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab !== 'schools') return;
+  const S0 = r.schools || {}, keys = Object.keys(S0).sort(), ment = r.mentors || {};
+  el.innerHTML = `${note}<p class="muted sm" style="margin-top:0">Mentors join a school through their tab in the planner Sheet, named like <b>Angel - Johansen</b>. The short name is the part after the dash.</p>
+    <table class="team-tbl"><thead><tr><th>Short name</th><th>Full name</th><th>Mentors (from the planner Sheet)</th><th></th></tr></thead><tbody>
+    ${keys.map(k => `<tr data-sch="${esc(k)}"><td><b>${esc(k)}</b></td><td><input value="${esc(S0[k])}" data-full style="min-width:200px;width:100%"></td><td>${(ment[k] || []).length ? esc(ment[k].join(', ')) : '<span class="muted">none yet</span>'}</td>
+      <td style="white-space:nowrap"><button class="btn sm" data-sa="save">Save name</button> <button class="btn sm danger" data-sa="del">Remove</button></td></tr>`).join('')}</tbody></table>
+    ${(r.found || []).length ? `<h4>Found in the planner Sheet, not added yet</h4><div class="an-list">${r.found.map(f => `<div class="an-item"><span><b>${esc(f.site)}</b> · ${esc(f.mentors.join(', '))}</span><button class="btn sm primary" data-add="${esc(f.site)}">Add ${esc(f.site)}</button></div>`).join('')}</div>` : ''}
+    <h4>Add a school</h4>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><input id="sc_site" placeholder="Short name (ex: Enochs)" style="width:180px"><input id="sc_full" placeholder="Full name (ex: Enochs High School)" style="flex:1;min-width:220px"><button class="btn primary" id="sc_add">Add school</button></div>
+    <div class="muted sm" style="margin-top:6px">After adding a school, its mentors show up once their planner tab is named "Name - ${'School'}". You can then put admins on it under Admins.${r.error ? ` <span style="color:var(--red)">${esc(r.error)}</span>` : ''}</div>`;
+  const save = async (site, full, remove, msg) => {
+    try { const j = await syncCall({ action: 'school-save', site, full, remove }); if (j.error) throw new Error(j.error); OV.data = null; if (typeof syncNow === 'function') syncNow(true); ovSchools(el, `<p style="color:var(--green);margin-top:0">${esc(msg)}</p>`); } catch (e) { toast(e.message); }
+  };
+  $$('#ov_body [data-sch]').forEach(tr => {
+    const k = tr.dataset.sch;
+    tr.querySelector('[data-sa=save]').onclick = () => save(k, tr.querySelector('[data-full]').value.trim(), false, `Saved ${k}.`);
+    tr.querySelector('[data-sa=del]').onclick = () => { if (confirm(`Remove ${k}? Its mentors stop showing under a school (their data stays). You can add it back any time.`)) save(k, '', true, `Removed ${k}.`); };
+  });
+  $$('#ov_body [data-add]').forEach(b => { b.onclick = () => save(b.dataset.add, b.dataset.add + ' High School', false, `Added ${b.dataset.add}.`); });
+  $('#sc_add').onclick = () => { const site = $('#sc_site').value.trim(); if (!site) return toast('Type the short name'); save(site, $('#sc_full').value.trim() || site + ' High School', false, `Added ${site}.`); };
 }
 
 /* ======================================================================== import a mentor planner (PDF or Excel) */
@@ -4063,6 +4157,7 @@ async function syncNow(quiet = true) {
       let changed = false;
       const names = new Set();
       store.set(SYNC_KEY + '.last', JSON.stringify(Object.fromEntries((j.mentors || []).map(m => [m.name, m.last]))));
+      if (j.goals) setGoals(j.goals);   // mentor goals the director set
       if (j.sites) { const was = JSON.stringify(SY.sites || {}); SY.sites = j.sites; SY.schoolNames = j.schools || {}; store.set('yes.sites.' + LS_KEY, JSON.stringify({ sites: j.sites, schools: j.schools || {} })); if (was !== JSON.stringify(j.sites) && IS_ADMIN && S.view === 'mentor' && $('#modalWrap').hidden) renderMentor(); }
       // a student tagged for another mentor who syncs their own list belongs to that mentor's list only
       const own = new Set((j.mentors || []).map(m => m.name.toLowerCase()));
@@ -4144,13 +4239,15 @@ async function adminWatch() {
   let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
   if (j && j.ok && j.name !== undefined) {
     const c = syncCfg(), perms = j.perms || null;
-    if (j.name !== (c.adminWho || '') || JSON.stringify(perms) !== JSON.stringify(c.perms || null) || (j.adminRole || '') !== (c.adminRole || '') || (j.mainName || '') !== (c.mainName || '')) {
+    if (j.name !== (c.adminWho || '') || JSON.stringify(perms) !== JSON.stringify(c.perms || null) || (j.adminRole || '') !== (c.adminRole || '') || (j.mainName || '') !== (c.mainName || '') || JSON.stringify(j.schools || null) !== JSON.stringify(c.schools || null)) {
       let raw = {}; try { raw = JSON.parse(store.get(SYNC_KEY) || '{}') || {}; } catch { raw = {}; }   // not syncCfg(): that has the session-only code in it
-      syncSave({ ...raw, adminWho: j.name, perms, adminRole: j.adminRole || '', mainName: j.mainName || '' });
+      syncSave({ ...raw, adminWho: j.name, perms, adminRole: j.adminRole || '', mainName: j.mainName || '', schools: j.schools || null });
+      if (typeof applyScope === 'function') applyScope();
       const L = loginInfo(); if (L) store.set(LOGIN_KEY, JSON.stringify({ ...L, name: j.name }));
       renderWho(); renderViewAs(); render();
     }
   }
+  if (j && j.ok && j.msg !== undefined) { SY.dirMsg = j.msg; if (typeof renderDirMsg === 'function') renderDirMsg(); }
   const k = 'yes.adminConf.' + LS_KEY;
   if (j && j.ok && j.stamp && store.get(k) !== j.stamp) { store.set(k, j.stamp); try { await applyAdminConf(j.conf || {}); } catch (e) { reportError('admin settings', e); } }
 }
@@ -4166,6 +4263,7 @@ async function plannerWatch() {   // one tiny call: has the admin sent something
     if (SY.annStamp === undefined) SY.annStamp = j.annStamp;
     else if (j.annStamp !== SY.annStamp) { SY.annStamp = j.annStamp; try { await annRefresh(c); } catch (e) { console.warn('admin updates', e.message); } }
   }
+  if (j.goal !== undefined) { const me = syncCfg().name || ''; setGoals(j.goal ? { [me]: j.goal } : {}); }
   if (j.school !== undefined && j.school !== SY.school) { SY.school = j.school; store.set('yes.school.' + LS_KEY, j.school); }   // which school my planner tab says I'm at
   if (j.dataStamp !== undefined) {   // the admin logged or changed a session for one of my students
     if (SY.dataStamp === undefined) SY.dataStamp = j.dataStamp;
@@ -4431,7 +4529,7 @@ function loginNeeded() {
   return L.role === 'boss' ? !c.code : !c.token;   // signed out, or didn't tick "keep me signed in" and this is a new session
 }
 function loginGate() {
-  renderItAs();
+  renderItAs(); if (typeof applyScope === 'function') applyScope();
   const c = syncCfg(), old = loginMode() === 'mentor' && c.code && !c.token;   // still set up with the old shared team code
   if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(async () => { await checkOwner(); offerPlanner(); }, 600);
   renderWho();
@@ -4501,7 +4599,7 @@ function showLogin(msg) {
         const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
         if (mode !== 'it' && p.role !== 'boss' && p.role !== 'it') throw new Error("That's not the admin code.");
-        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null, adminRole: mode === 'it' ? '' : p.adminRole || '', mainName: p.mainName || '' });
+        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null, adminRole: mode === 'it' ? '' : p.adminRole || '', mainName: p.mainName || '', schools: mode === 'it' ? null : p.schools || null });
         if (mode !== 'it') who = p.name || 'Admin';
         setSessCode(remember ? '' : code);
       } else {
@@ -5196,7 +5294,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120131215';
+const BUILD_ID = '20261120133709';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
