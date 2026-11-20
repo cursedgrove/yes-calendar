@@ -2045,7 +2045,7 @@ function renderMentor() {
     if (a === 'logins') return openLogins();
     if (a === 'coverage') return openCoverage();
     if (a === 'report') return openReport();
-    if (a === 'ittools') return openIT();
+    if (a === 'ittools') return openIT(undefined, true);
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
     if (e.target.id === 'gUndoBtn') return gradeUndo();
     if (a === 'roster') return openRoster();
@@ -4131,7 +4131,7 @@ const IT = { tab: 'status', health: null, ms: 0 };
 const IT_TABS = [['status', 'Status'], ['mentors', 'Mentors'], ['problems', 'Problems'], ['check', 'Data check'], ['names', 'Names'], ['compare', 'Compare'], ['accounts', 'Accounts'], ['security', 'Security'], ['maint', 'Maintenance']];
 const itAgo = iso => { if (!iso) return 'never'; const d = new Date(String(iso).replace(' ', 'T')); if (isNaN(d)) return String(iso); const m = Math.round((Date.now() - d) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
 const itCall = body => syncCall(body);
-async function openIT(tab) {
+async function openIT(tab, quick) {   // quick: show what we have right away (IT tools button, switching tabs)
   if (!syncOn()) return toast('Sign in with the IT code first.');
   if (tab) IT.tab = tab;
   openModal(`<div class="m-head"><h2>IT tools</h2><button class="iconbtn" data-x>✕</button></div>
@@ -4139,14 +4139,17 @@ async function openIT(tab) {
     <div class="m-body" id="it_body"><p class="muted">Checking...</p></div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   $$('#modal [data-itab]').forEach(b => { b.onclick = () => { IT.tab = b.dataset.itab; $$('#modal [data-itab]').forEach(x => x.classList.toggle('on', x === b)); itShow(); }; });
-  const t0 = performance.now();
-  try { IT.health = await itCall({ action: 'it-health' }); }
+  const t0 = performance.now(), had = quick && IT.health;
+  if (had) itShow();
+  const ping = (async () => { try { const t = performance.now(); await itCall({ action: 'ping' }); return Math.round(performance.now() - t); } catch (e) { return null; } })();
+  try { IT.health = await itCall({ action: 'it-health', fresh: !quick }); }
   catch (e) {
     try { IT.health = await itCall({ action: 'it-status' }); IT.health.old = true; }   // script older than v14
-    catch (e2) { $('#it_body').innerHTML = `<p style="color:var(--red)">Couldn't reach the team Sheet: ${esc(e2.message)}</p>`; return; }
+    catch (e2) { if (had) return toast("Couldn't refresh: " + e2.message); $('#it_body').innerHTML = `<p style="color:var(--red)">Couldn't reach the team Sheet: ${esc(e2.message)}</p>`; return; }
   }
   IT.ms = Math.round(performance.now() - t0);
-  itShow();
+  IT.ping = await ping;
+  if (!had || ['status', 'mentors'].includes(IT.tab)) itShow();   // don't redraw a tab someone may be typing in
 }
 function itShow() {
   const el = $('#it_body'); if (!el) return;
@@ -4154,6 +4157,7 @@ function itShow() {
   ({ status: itStatusTab, mentors: itMentorsTab, problems: itProblemsTab, check: itCheckTab, names: itNamesTab, compare: itCompareTab, accounts: itAccountsTab, security: itSecurityTab, maint: () => itMaintenance(IT.health) })[IT.tab]?.(el);
 }
 const itCard = (state, label, value, note = '') => `<div class="it-card ${state}"><div class="lbl">${label}</div><b>${value}</b>${note ? `<div class="muted sm">${note}</div>` : ''}</div>`;
+function itSecs(ms) { return ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1) + ' s'; }
 function itStatusTab(el) {
   const st = IT.health, h = st.health || {}, c = st.counts || {};
   const bkAge = st.lastBackup ? (Date.now() - new Date(st.lastBackup.replace(' ', 'T'))) / 36e5 : 999;
@@ -4161,8 +4165,8 @@ function itStatusTab(el) {
   const slow = reads.filter(([, v]) => v.ms > 40000).length;
   const gc = Object.keys(h.calendars || {}).length;
   el.innerHTML = `<div class="it-cards">
-    ${itCard('ok', 'Connection', 'OK', `${IT.ms} ms`)}
-    ${itCard(st.version === '14' || +st.version >= 14 ? 'ok' : 'warn', 'Team script', 'v' + esc(st.version), esc(st.timeZone || ''))}
+    ${itCard(IT.ping == null || IT.ping > 5000 ? 'warn' : 'ok', 'Connection', IT.ping == null ? 'Slow' : IT.ping < 2000 ? 'Fast' : IT.ping < 5000 ? 'OK' : 'Slow', `${IT.ping == null ? '?' : itSecs(IT.ping)} to reach the Sheet · ${st.cached ? 'numbers from ' + esc(itAgo(st.checkedAt)) : 'full check ' + itSecs(IT.ms)}`)}
+    ${itCard(+st.version >= 14 ? 'ok' : 'warn', 'Team script', 'v' + esc(st.version), esc(st.timeZone || ''))}
     ${itCard(h.plannerTrigger ? 'ok' : 'bad', 'Planner Sheet alerts', h.plannerTrigger ? 'On' : 'Off', h.plannerTrigger ? 'green/red shows up in about 20 s' : 'calendars fall back to every 4 minutes')}
     ${itCard(st.nightly ? (bkAge < 36 ? 'ok' : 'warn') : 'bad', 'Nightly backup', st.nightly ? 'On' : 'Off', st.lastBackupError ? `<span style="color:var(--red)">last try failed: ${esc(st.lastBackupError)}</span>` : 'last ' + esc(itAgo(st.lastBackup)))}
     ${itCard(slow ? 'warn' : reads.length ? 'ok' : 'warn', 'Planner Sheet reads', reads.length ? reads.map(([n, v]) => `${esc(n)} ${Math.round(v.ms / 1000)}s`).join(' · ') : 'none yet', reads.length ? 'last read ' + reads.map(([n, v]) => `${esc(n)} ${itAgo(v.at)}`).join(', ') : '')}
@@ -4171,8 +4175,8 @@ function itStatusTab(el) {
     ${itCard('ok', 'On the Sheet', `${c.Students || 0} students`, `${c['Pull-outs'] || 0} pull-outs · ${c.Logins || 0} logins · ${(h.fixes || []).length} name fixes`)}
     ${itCard('ok', 'Last "Refresh everyone"', esc(itAgo(h.reloadAt)), h.resetAt ? 'new school year started ' + esc(itAgo(h.resetAt)) : '')}
   </div><div class="row" style="margin-top:10px;gap:8px"><button class="btn" id="it_again">Check again</button></div>`;
-  $('#it_again').onclick = () => openIT();
-  $$('#it_body [data-goto]').forEach(a => { a.onclick = e => { e.preventDefault(); openIT(a.dataset.goto); }; });
+  $('#it_again').onclick = () => openIT(IT.tab);
+  $$('#it_body [data-goto]').forEach(a => { a.onclick = e => { e.preventDefault(); openIT(a.dataset.goto, true); }; });
 }
 function itMentorsTab(el) {
   const st = IT.health, h = st.health || {};
@@ -4456,7 +4460,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119234343';
+const BUILD_ID = '20261119235825';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
