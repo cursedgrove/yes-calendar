@@ -532,6 +532,16 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .it-chk{border:1px solid var(--s1,#ddd);border-radius:8px;padding:6px 10px;margin:8px 0}
 .it-chk h4{margin:4px 0;display:flex;gap:6px;align-items:center}
 
+/* roster: pick one or many students */
+.roster-table .rs-ck{width:28px;padding-right:0}
+.roster-table tr.rs-on td{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.rs-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 8px;padding:8px;border:1px solid var(--s0);border-radius:10px;background:var(--mantle)}
+.rs-actions .rs-change{display:inline-flex;gap:4px;align-items:center}
+.rs-actions .rs-change input{width:130px}
+.rs-actions #rs_note{flex-basis:100%}
+.btn.danger{color:#fff;background:var(--red);border-color:var(--red)}
+.rs-actions select{width:auto;min-width:0}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -2411,15 +2421,99 @@ function openStudent(s) {
   });
 }
 
-function openRoster() {
+function openRoster(keepSel) {
   const list = M().students.slice().sort((a, b) => (+(b.active !== false) - +(a.active !== false)) || a.name.localeCompare(b.name));
+  // picking students: one or many, then change or delete them together
+  const sel = new Set((keepSel || []).filter(id => list.some(s => s.id === id)));
+  const editable = s => !s.src;   // a mentor's own students; the admin's team copies change on the mentor's calendar
+  const FIELDS = [['grade', 'Grade'], ['period', 'Period'], ['classes', 'Class'], ['room', 'Room'], ['teacher', 'Teacher'], ['school', 'School'], ['mentor', 'Mentor'], ['every', 'Call in every ___ days']];
+  const rowsHTML = () => `${list.map(s => { const lr = lastCall(s.id, c => c.outcome === 'reached'); return `<tr data-rs="${s.id}" class="${sel.has(s.id) ? 'rs-on' : ''}" style="${s.active === false ? 'opacity:.5' : ''}"><td class="rs-ck"><input type="checkbox" data-rsck ${sel.has(s.id) ? 'checked' : ''} aria-label="Select ${esc(s.name)}"></td><td>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.active === false ? ' <span class="muted sm">(inactive)</span>' : ''}</td><td>${esc(s.grade)}</td><td>${esc(s.idnum || '')}</td><td>${esc(s.period || '')}</td><td>${esc(s.classes || '')}</td><td>${esc(s.room || '')}</td><td>${esc(s.teacher || '')}</td><td>${esc(s.mentor)}</td><td>${lr ? relDay(lr.at) : '<span class="muted">never</span>'}</td><td>${nextDue(s) ? dueSpan(nextDue(s)).replace('next: ', '') : '<span class="muted">now</span>'}</td></tr>`; }).join('') || '<tr><td colspan="11" class="muted">No students yet</td></tr>'}`;
   openModal(`<div class="m-head"><h2>Roster (${list.length})</h2><button class="iconbtn" data-x>✕</button></div>
-  <div class="m-body"><table class="roster-table"><thead><tr><th>Name</th><th>Grade</th><th>ID</th><th>Period</th><th>Class</th><th>Room</th><th>Teacher</th><th>Mentor</th><th>Last came in</th><th>Next</th></tr></thead><tbody>
-  ${list.map(s => { const lr = lastCall(s.id, c => c.outcome === 'reached'); return `<tr data-rs="${s.id}" style="${s.active === false ? 'opacity:.5' : ''}"><td>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}${s.active === false ? ' <span class="muted sm">(inactive)</span>' : ''}</td><td>${esc(s.grade)}</td><td>${esc(s.idnum || '')}</td><td>${esc(s.period || '')}</td><td>${esc(s.classes || '')}</td><td>${esc(s.room || '')}</td><td>${esc(s.teacher || '')}</td><td>${esc(s.mentor)}</td><td>${lr ? relDay(lr.at) : '<span class="muted">never</span>'}</td><td>${nextDue(s) ? dueSpan(nextDue(s)).replace('next: ', '') : '<span class="muted">now</span>'}</td></tr>`; }).join('') || '<tr><td colspan="10" class="muted">No students yet</td></tr>'}
+  <div class="m-body">
+    <div class="row rs-bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="muted sm">Select:</span><button class="linkbtn sm" data-rsall>All</button><button class="linkbtn sm" data-rsact>Active</button><button class="linkbtn sm" data-rsinact>Inactive</button><button class="linkbtn sm" data-rsnone>None</button>
+      <span id="rs_n" class="sm" style="margin-left:6px"></span>
+    </div>
+    <div class="rs-actions" id="rs_actions" hidden>
+      <button class="btn sm" data-rsedit title="Open this student">Open</button>
+      <button class="btn sm" data-rsoff>Mark inactive</button><button class="btn sm" data-rson>Mark active</button>
+      <button class="btn sm" data-rsflag>Priority on/off</button>
+      <span class="rs-change"><select id="rs_field">${FIELDS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><input id="rs_val" placeholder="New value" list="rs_vals"><datalist id="rs_vals"></datalist><button class="btn sm" data-rsset>Change</button></span>
+      <button class="btn sm" data-rscsv>Export selected</button>
+      <button class="btn sm danger" data-rsdel>Delete</button>
+      <div class="muted sm" id="rs_note"></div>
+    </div>
+    <table class="roster-table"><thead><tr><th class="rs-ck"><input type="checkbox" id="rs_head" aria-label="Select all"></th><th>Name</th><th>Grade</th><th>ID</th><th>Period</th><th>Class</th><th>Room</th><th>Teacher</th><th>Mentor</th><th>Last came in</th><th>Next</th></tr></thead><tbody>
+  ${rowsHTML()}
   </tbody></table></div>
   <div class="m-foot"><button class="btn left" data-csv>Export roster (.csv)</button><button class="btn" data-imp>Import</button><button class="btn primary" data-add>Add student</button></div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
-  $('#modal tbody').onclick = e => { const r = e.target.closest('[data-rs]'); if (r) openStudent(stuById(+r.dataset.rs)); };
+  const chosen = () => list.filter(s => sel.has(s.id));
+  const vals = () => { const k = $('#rs_field').value; $('#rs_vals').innerHTML = [...new Set(M().students.map(s => String(s[k] || '')).filter(Boolean))].sort().slice(0, 60).map(v => `<option value="${esc(v)}">`).join(''); };
+  const paint = () => {
+    $$('#modal tbody tr[data-rs]').forEach(tr => { const on = sel.has(+tr.dataset.rs); tr.classList.toggle('rs-on', on); const c = tr.querySelector('[data-rsck]'); if (c) c.checked = on; });
+    const n = sel.size, ro = chosen().filter(s => !editable(s)).length;
+    $('#rs_n').textContent = n ? `${n} selected` : '';
+    $('#rs_actions').hidden = !n;
+    $('#modal [data-rsedit]').hidden = n !== 1;
+    $('#rs_note').textContent = ro ? `${ro} of these ${ro === 1 ? 'is' : 'are'} on a mentor's own calendar, so only Export works for ${ro === 1 ? 'it' : 'them'} here.` : '';
+    const h = $('#rs_head'); h.checked = n > 0 && n === list.length; h.indeterminate = n > 0 && n < list.length;
+  };
+  vals(); paint();
+  $('#rs_field').onchange = vals;
+  const pick = f => { sel.clear(); list.filter(f).forEach(s => sel.add(s.id)); paint(); };
+  $('#modal [data-rsall]').onclick = () => pick(() => true);
+  $('#modal [data-rsact]').onclick = () => pick(s => s.active !== false);
+  $('#modal [data-rsinact]').onclick = () => pick(s => s.active === false);
+  $('#modal [data-rsnone]').onclick = () => pick(() => false);
+  $('#rs_head').onchange = e => pick(() => e.target.checked);
+  let lastClicked = null;
+  $('#modal tbody').onclick = e => {
+    const r = e.target.closest('[data-rs]'); if (!r) return;
+    const id = +r.dataset.rs;
+    if (e.target.closest('.rs-ck') || e.shiftKey || e.ctrlKey || e.metaKey) {   // the checkbox (shift-click picks a range)
+      if (e.shiftKey && lastClicked != null) {
+        const ids = list.map(s => s.id), a = ids.indexOf(lastClicked), b = ids.indexOf(id), on = !sel.has(id) || e.target.matches('[data-rsck]') && e.target.checked;
+        ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => on ? sel.add(x) : sel.delete(x));
+      } else if (e.target.matches('[data-rsck]')) { e.target.checked ? sel.add(id) : sel.delete(id); } else { sel.has(id) ? sel.delete(id) : sel.add(id); }
+      lastClicked = id; paint(); return;
+    }
+    openStudent(stuById(id));
+  };
+  const work = async (label, fn) => {
+    const go = chosen().filter(editable); if (!go.length) return toast("Those students can only be changed on their mentor's calendar.");
+    for (const s of go) await fn(s);
+    await reload(); toast(`${label}: ${go.length} student${go.length === 1 ? '' : 's'}`); openRoster([...sel]);
+  };
+  $('#modal [data-rsedit]').onclick = () => { const s = chosen()[0]; if (s) openStudent(s); };
+  $('#modal [data-rsoff]').onclick = () => work('Marked inactive', s => api('PUT', 'students/' + s.id, { ...s, active: false }));
+  $('#modal [data-rson]').onclick = () => work('Marked active', s => api('PUT', 'students/' + s.id, { ...s, active: true }));
+  $('#modal [data-rsflag]').onclick = () => { const on = !chosen().filter(editable).every(s => s.flagged); work(on ? 'Priority on' : 'Priority off', s => api('PUT', 'students/' + s.id, { ...s, flagged: on })); };
+  $('#modal [data-rsset]').onclick = () => {
+    const k = $('#rs_field').value, label = FIELDS.find(f => f[0] === k)[1], v = $('#rs_val').value.trim();
+    if (k === 'every' && v && !(+v >= 1 && +v <= 90)) return toast('Use a number of days from 1 to 90 (or leave it empty for the usual)');
+    if (k === 'grade' && v && !/^\d{1,2}$/.test(v)) return toast('Grade is a number, like 9 or 10');
+    work(`${label} set to "${v || '(empty)'}"`, s => api('PUT', 'students/' + s.id, { ...s, [k]: k === 'every' ? (v ? +v : '') : v }));
+  };
+  $('#modal [data-rscsv]').onclick = () => {
+    const rows = [['Name', 'Grade', 'Student ID', 'Period', 'Class', 'Room', 'Teacher', 'Phone', 'Email', 'School', 'Mentor', 'Active', 'Priority', 'Last came in', 'Next check-in', 'Notes']];
+    for (const s of chosen()) { const lr = lastCall(s.id, c => c.outcome === 'reached'); rows.push([s.name, s.grade, s.idnum || '', s.period || '', s.classes || '', s.room || '', s.teacher || '', s.phone, s.email, s.school, s.mentor, s.active !== false ? 'Yes' : 'No', s.flagged ? 'Yes' : '', lr ? lr.at.replace('T', ' ') : '', nextDue(s) ? ymd(nextDue(s)) : 'now', s.notes]); }
+    downloadText(`roster-selected-${chosen().length}.csv`, rows.map(r => r.map(csvCell).join(',')).join('\r\n'), 'text/csv');
+  };
+  $('#modal [data-rsdel]').onclick = async () => {
+    const go = chosen().filter(editable); if (!go.length) return toast("Those students can only be changed on their mentor's calendar.");
+    const ids = new Set(go.map(s => s.id)), calls = Mall().calls.filter(c => ids.has(c.student_id));
+    if (!confirm(`Delete ${go.length} student${go.length === 1 ? '' : 's'}${calls.length ? ` and their ${calls.length} check-in${calls.length === 1 ? '' : 's'}` : ''}? You can undo right after.`)) return;
+    const keep = go.map(s => clone(s)), keepCalls = calls.map(c => clone(c));
+    for (const s of go) { try { await api('DELETE', 'students/' + s.id); } catch { /* already gone */ } }
+    sel.clear(); await reload(); openRoster();
+    toast(`Deleted ${go.length} student${go.length === 1 ? '' : 's'}`, { duration: 10000, undo: async () => {
+      const map = new Map();
+      for (const s of keep) { const { id, ...rest } = s; const n = await api('POST', 'students', rest); map.set(id, n.id); }
+      for (const c of keepCalls) { const { id, ...rest } = c; if (map.has(c.student_id)) await api('POST', 'calls', { ...rest, student_id: map.get(c.student_id) }); }
+      await reload(); toast('Restored');
+    } });
+  };
   $('#modal [data-add]').onclick = () => openStudent(null);
   $('#modal [data-imp]').onclick = () => openImport();
   $('#modal [data-csv]').onclick = () => {
@@ -4703,7 +4797,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120111509';
+const BUILD_ID = '20261120112057';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
