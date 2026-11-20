@@ -3888,6 +3888,8 @@ function syncInit() {
     if (SY.timer && syncOn() && c.role !== 'boss') navigator.sendBeacon?.(c.url, new Blob([JSON.stringify({ ...syncPayload(c), code: c.code })], { type: 'text/plain' }));
   });
   document.addEventListener('click', () => { if (SY.reloadLater && $('#modalWrap').hidden && $('#popover').hidden) { SY.reloadLater = false; reload(); } }, true);
+  { const close0 = closeModal;   // data that arrived while a window was open shows as soon as it closes (not on the next click)
+    closeModal = function (...args) { const r = close0.apply(this, args); if (SY.reloadLater && $('#modalWrap').hidden && $('#popover').hidden) { SY.reloadLater = false; setTimeout(() => reload(), 0); } return r; }; }
 }
 
 function openSync() {
@@ -4294,6 +4296,30 @@ function kickedOut(oldCode) {
 }
 
 /* ---------- admin: make, reset and remove mentor passcodes ---------- */
+/* ---------- adding a mentor: find their planner Sheet tab and bring in their students and check-ins ---------- */
+function loginSchools() { const v = Object.keys((typeof SY !== 'undefined' && SY.schoolNames) || {}); return v.length ? v : ['Davis', 'Johansen']; }
+function importMsg(name, site, r) {
+  if (!r) return '';
+  if (r.error) return `Couldn't import ${name}'s planner tab: ${r.error}`;
+  if (!r.found) return `No "${name} - ${site}" tab in the planner Sheet yet. Their students come in on their own once that tab exists and they sign in (or press Import from planner).`;
+  return `Imported from "${r.tab}": ${r.students} student${r.students === 1 ? '' : 's'} and ${r.calls} check-in${r.calls === 1 ? '' : 's'}.${r.skipped ? ` ${r.skipped} check-in${r.skipped === 1 ? '' : 's'} with names not on their list were left out.` : ''}`;
+}
+async function importMentorTab(name, site) {
+  try {
+    const f = await syncCall({ action: 'planner-find', name, site });
+    if (!f || !f.found) return { found: false, site };
+    const j = await syncCall({ action: 'planner-live', name: f.name });
+    const tabs = (j.tabs || []).filter(t => !t.site || t.site === f.site);
+    if (!tabs.length) return { found: false, site };
+    const { now, newStu } = liveCheckins(tabs, []);
+    const onList = new Set(newStu.map(s => plNorm(s.name)));
+    const students = newStu.map(s => ({ name: s.name, mentor: f.name, grade: s.grade || '', idnum: '', period: s.period || '', classes: s.classes || '', room: s.room || '', teacher: s.teacher || '', active: true }));
+    const all = Object.values(now), calls = all.filter(v => onList.has(plNorm(v.name))).map(v => ({ student: v.name, date: v.date, time: PER_TIME[v.period] || '12:00', result: v.outcome === 'reached' ? 'Came in' : "Didn't come in" }));
+    if (students.length || calls.length) await syncCall({ action: 'push', name: f.name, merge: true, students, calls });   // adds to what's there, never wipes
+    if (typeof syncNow === 'function') syncNow(true);
+    return { found: true, site: f.site, tab: f.tab, students: students.length, calls: calls.length, skipped: all.length - calls.length };
+  } catch (e) { return { error: e.message, site }; }
+}
 async function openLogins(made) {
   if (!syncOn()) return toast('Sign in with the admin code first.');
   let users = [];
@@ -4303,11 +4329,13 @@ async function openLogins(made) {
   <div class="m-body">
     ${made ? `<div class="pc-card"><div class="muted sm">${made.reset ? 'New passcode' : 'Passcode'} for <b>${esc(made.name)}</b></div><div class="pc-code" id="pc_code">${esc(made.passcode)}</div>
       <div class="row" style="justify-content:center;gap:8px"><button class="btn" id="pc_copy">Copy</button></div>
-      <div class="muted sm">Give this to ${esc(made.name)}. It's only shown now. If it gets lost, just reset it.${made.reset ? ` Their old passcode stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
+      ${made.imported ? `<div class="sm" style="margin:4px 0">${esc(importMsg(made.name, made.imported.site, made.imported))}</div>` : ''}<div class="muted sm">Give this to ${esc(made.name)}. It's only shown now. If it gets lost, just reset it.${made.reset ? ` Their old passcode stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
     <p class="muted sm" style="margin:0">Each mentor signs in with their name and their own passcode, so nobody can sign in as someone else.</p>
     ${users.length ? `<div class="an-list">${users.map(u => `<div class="an-item" data-un="${esc(u.name)}"><div><b>${esc(u.name)}</b> <span class="muted sm">passcode made ${esc(syncWhen(u.made))} · ${u.devices ? `signed in on ${u.devices} device${u.devices > 1 ? 's' : ''}` : 'not signed in yet'}</span></div>
-      <span><button class="btn sm" data-ureset title="Make a new passcode. The old one stops working.">Reset passcode</button> <button class="btn sm" data-uout title="Sign them out on every computer">Sign out</button> <button class="btn sm" data-udel>Remove</button></span></div>`).join('')}</div>` : '<p class="muted">No mentor logins yet.</p>'}
-    <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn primary" id="un_go">Make passcode</button></div>
+      <span><button class="btn sm" data-uimp title="Bring in their students and check-ins from their planner Sheet tab again">Import from planner</button> <button class="btn sm" data-ureset title="Make a new passcode. The old one stops working.">Reset passcode</button> <button class="btn sm" data-uout title="Sign them out on every computer">Sign out</button> <button class="btn sm" data-udel>Remove</button></span></div>`).join('')}</div>` : '<p class="muted">No mentor logins yet.</p>'}
+    <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      <select id="un_school" title="Their school: their planner tab is found and imported">${loginSchools().map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')}<option value="">No planner tab</option></select><button class="btn primary" id="un_go">Make passcode</button></div>
+    <div class="muted sm">Picking the school finds their <b>Name - School</b> tab in the planner Sheet and brings in their students and check-ins right away.</div>
     <div id="un_msg" class="muted sm"></div>
   </div>
   <div class="m-foot"><button class="btn" data-x>Done</button></div>`, 'lg');
@@ -4318,9 +4346,22 @@ async function openLogins(made) {
     const name = $('#un_name').value.trim(); if (!name) return ($('#un_msg').textContent = "Type the mentor's name.");
     const exists = users.find(u => u.name.toLowerCase() === name.toLowerCase());
     if (exists && !confirm(`${exists.name} already has a passcode. Make a new one? Their old one stops working.`)) return;
-    run({ action: 'user-new', name }, r => openLogins(r));
+    const site = $('#un_school').value;
+    run({ action: 'user-new', name }, async r => {
+      if (site) { $('#un_msg').textContent = `Looking for the "${name} - ${site}" tab...`; r.imported = await importMentorTab(name, site); }
+      openLogins(r);
+    });
   };
+  $$('#modal [data-uimp]').forEach(b => { b.onclick = async () => {
+    const n = b.closest('[data-un]').dataset.un, site = siteOf(n) || $('#un_school').value;
+    if (!site) return toast(`Pick ${n}'s school in the box at the bottom first.`);
+    b.disabled = true; b.textContent = 'Importing...';
+    const res = await importMentorTab(n, site);
+    b.disabled = false; b.textContent = 'Import from planner';
+    toast(importMsg(n, site, res), { duration: 10000 });
+  }; });
   $('#un_name').onkeydown = e => { if (e.key === 'Enter') $('#un_go').click(); };
+  if (made && made.imported) $('#un_msg').innerHTML = esc(importMsg(made.name, made.imported.site, made.imported));
   $$('#modal [data-ureset]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Reset ${n}'s passcode? Their old one stops working and they'll be signed out until they enter the new one.`)) run({ action: 'user-new', name: n }, r => openLogins(r)); }; });
   $$('#modal [data-uout]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; run({ action: 'user-signout', name: n }, () => { toast(`${n} is signed out everywhere. Their passcode still works.`); openLogins(); }); }; });
   $$('#modal [data-udel]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Remove ${n}'s login? They won't be able to sign in until you make a new passcode. Their data stays saved.`)) run({ action: 'user-del', name: n }, () => openLogins()); }; });
@@ -4660,7 +4701,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120103434';
+const BUILD_ID = '20261120104307';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
