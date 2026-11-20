@@ -3352,15 +3352,16 @@ function syncStatus() {
   return SY.last ? fmtTime(SY.last) : '...';
 }
 // what a mentor sends: their own students (not ones that came from the Sheet) and those students' pull-outs
+const stuAny = id => Mall().students.find(s => s.id === id);   // any student, not just the ones on screen
 function syncPayload(c) {
   const me = (c.name || myMentor()).trim().toLowerCase(), helped = helpList().map(x => x.toLowerCase());
-  const own = Mall().students.filter(s => { if (s.src) return false; const t = (s.mentor || '').trim().toLowerCase(); return !t || t === me || t.split(/\s+/)[0] === me.split(/\s+/)[0] || helped.includes(t); }), ids = new Set(own.map(s => s.id));
+  const own = Mall().students.filter(s => { if (s.src) return false; const t = (s.mentor || '').trim().toLowerCase(); return !t || t === me || t.split(/\s+/)[0] === me.split(/\s+/)[0] || helped.includes(t); }), ids = new Set(own.map(s => s.id)), byId = new Map(own.map(s => [s.id, s]));
   return {
     action: 'push', name: c.name,
     students: own.map(s => ({ name: s.name, mentor: s.mentor || c.name, grade: s.grade, idnum: c.noIds === false ? s.idnum : '', period: s.period, classes: s.classes, room: s.room, teacher: s.teacher, active: s.active !== false, nextAt: s.nextAt || '', nextSet: s.nextSet || '', absentOn: s.absentOn || '' })),
     sched: true,
-    calls: Mall().calls.filter(x => ids.has(x.student_id))   // all of them, even when the screen is filtered.sort((a, b) => a.at.localeCompare(b.at))
-      .map(x => ({ student: stuById(x.student_id).name, date: x.at.slice(0, 10), time: x.at.slice(11, 16), result: x.outcome === 'reached' ? 'Came in' : "Didn't come in" })),
+    calls: Mall().calls.filter(x => ids.has(x.student_id))   // all of them, even when the screen is filtered
+      .map(x => ({ student: byId.get(x.student_id).name, date: x.at.slice(0, 10), time: x.at.slice(11, 16), result: x.outcome === 'reached' ? 'Came in' : "Didn't come in" })),
   };
 }
 /* ---------- a mentor's devices stay in step: pull what the Sheet has for them, merge, push the result ----------
@@ -3421,7 +3422,7 @@ async function mentorSync(c) {
     for (const [k, rx] of rC) {
       const lx = lC.get(k); if (!lx || !(k in bCv) || bCv[k] == null) continue;
       if (RES(rx.result) !== bCv[k] && RES(lx.result) === bCv[k]) {
-        const call = Mall().calls.find(cl => { const st = stuById(cl.student_id); return st && ckey(st.name, cl.at.slice(0, 10), cl.at.slice(11, 16)) === k; });
+        const call = Mall().calls.find(cl => { const st = stuAny(cl.student_id); return st && ckey(st.name, cl.at.slice(0, 10), cl.at.slice(11, 16)) === k; });
         if (call) { await api('PUT', 'calls/' + call.id, { ...call, outcome: RES(rx.result) }); changed = true; }
       }
     }
@@ -3439,7 +3440,7 @@ async function mentorSync(c) {
     }
     if (goneC.length) {
       const del = new Set(goneC);
-      for (const call of Mall().calls.slice()) { const st = stuById(call.student_id); if (st && del.has(ckey(st.name, call.at.slice(0, 10), call.at.slice(11, 16)))) { try { await api('DELETE', 'calls/' + call.id); } catch { /* already gone */ } changed = true; } }
+      for (const call of Mall().calls.slice()) { const st = stuAny(call.student_id); if (st && del.has(ckey(st.name, call.at.slice(0, 10), call.at.slice(11, 16)))) { try { await api('DELETE', 'calls/' + call.id); } catch { /* already gone */ } changed = true; } }
     }
     if (changed) { await reload(); pl = syncPayload(c); }
     // deleted on this device since last time: tell the Sheet
@@ -4442,7 +4443,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119235825';
+const BUILD_ID = '20261120000620';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
