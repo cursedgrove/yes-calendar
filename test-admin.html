@@ -1816,7 +1816,7 @@ function siteOf(name) {
   const hit = e.find(([n]) => n.toLowerCase() === k) || e.find(([n]) => n.toLowerCase().split(/\s+/)[0] === k.split(/\s+/)[0]);
   return hit ? hit[1] : '';
 }
-const schoolSites = () => [...new Set(Object.values(siteMap()))].sort();
+const schoolSites = () => { siteMap(); return [...new Set([...Object.values(siteMap()), ...Object.keys((typeof SY !== 'undefined' && SY.schoolNames) || {})])].sort(); };   // schools with mentors + every school the admin added
 const inSchool = name => !S.mschool || siteOf(name) === S.mschool;
 function mySchool() {   // for a mentor's own calendar: the school their planner tab says
   const v = (typeof SY !== 'undefined' && SY.school) || store.get('yes.school.' + LS_KEY) || '';
@@ -4849,7 +4849,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120114026';
+const BUILD_ID = '20261120120024';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
