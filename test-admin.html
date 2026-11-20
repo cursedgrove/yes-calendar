@@ -2408,7 +2408,7 @@ function openStudent(s) {
   openModal(`<div class="m-head"><h2>${isNew ? 'Add student' : esc(s.name)}</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
     ${an ? `<div class="note-box"><b>Note from your admin</b><div>${esc(an.note)}</div><span class="muted sm">${esc(syncWhen(an.updated))}</span></div>` : ''}
-    <div class="row"><label class="field" style="flex:2"><span>Name</span><input id="s_name" value="${esc(s.name)}" autofocus></label><label class="field" style="flex:1"><span>Grade</span><select id="s_grade"><option value=""></option>${['6', '7', '8', '9', '10', '11', '12'].map(g => `<option ${String(s.grade) === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label></div>
+    <div class="row"><label class="field" style="flex:2"><span>Name</span><input id="s_name" value="${esc(s.name)}" autofocus></label><label class="field" style="flex:1"><span>Grade</span><select id="s_grade"><option value=""></option>${[...(String(s.grade) === '6' ? ['6'] : []), '7', '8', '9', '10', '11', '12'].map(g => `<option ${String(s.grade) === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label></div>
     <div class="row"><label class="field" style="flex:1"><span>Student ID</span><input id="s_idnum" value="${esc(s.idnum || '')}"></label><label class="field" style="flex:1"><span>Pull-out period(s)</span><input id="s_period" value="${esc(s.period || '')}" placeholder="ex: 3/6"></label></div>
     <label class="field"><span>Class(es) to pull from</span><input id="s_classes" value="${esc(s.classes || '')}" placeholder="ex: DSLR Photography / Guitar"></label>
     <div class="row"><label class="field" style="flex:1"><span>Room(s)</span><input id="s_room" value="${esc(s.room || '')}" placeholder="ex: 106 / 700"></label><label class="field" style="flex:2"><span>Teacher(s)</span><input id="s_teacher" value="${esc(s.teacher || '')}"></label></div>
@@ -2510,7 +2510,7 @@ function openRoster(keepSel) {
   $('#modal [data-rsset]').onclick = () => {
     const k = $('#rs_field').value, label = FIELDS.find(f => f[0] === k)[1], v = $('#rs_val').value.trim();
     if (k === 'every' && v && !(+v >= 1 && +v <= 90)) return toast('Use a number of days from 1 to 90 (or leave it empty for the usual)');
-    if (k === 'grade' && v && !/^\d{1,2}$/.test(v)) return toast('Grade is a number, like 9 or 10');
+    if (k === 'grade' && v && !(/^\d{1,2}$/.test(v) && +v >= 7 && +v <= 12)) return toast('Grade is a number from 7 to 12');
     work(`${label} set to "${v || '(empty)'}"`, s => api('PUT', 'students/' + s.id, { ...s, [k]: k === 'every' ? (v ? +v : '') : v }));
   };
   $('#modal [data-rscsv]').onclick = () => {
@@ -4815,7 +4815,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120112057';
+const BUILD_ID = '20261120112238';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
