@@ -732,11 +732,11 @@ html,body{max-width:100%;overflow-x:hidden}
 
 /* past events stay readable: a lighter color says "past", the name stays full-strength text */
 .chip.past{opacity:1}
-.chip.past .n{color:var(--text)}
+.chip.past .n{color:color-mix(in srgb,var(--text) 72%,var(--base))}
 .chip.past .dot{opacity:.55}
 .chip.allday.past{opacity:.85}
 .tev.past{opacity:1;background:color-mix(in srgb,var(--c) 24%,var(--base));color:var(--text);border-left-color:color-mix(in srgb,var(--c) 70%,var(--base))}
-.tev.past b{color:var(--text)}
+.tev.past b{color:color-mix(in srgb,var(--text) 72%,var(--base))}
 /* narrow side-by-side events: the name wraps onto two small lines instead of being cut off */
 .tev{container-type:inline-size}
 .tev .nm-short,.tev .nm-ini{display:none}
@@ -4474,7 +4474,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120085446';
+const BUILD_ID = '20261120085751';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
