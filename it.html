@@ -3631,12 +3631,19 @@ function checkReload(stamp) {
   toast('Updating to the newest version...'); setTimeout(go, 1500);
 }
 // every 20 seconds: ask (cheaply) whether this mentor's planner tab changed; if it did, read it now and share the result
-async function plannerWatch() {
-  if (!LIVE_ON || !syncOn() || SY.busy || document.hidden) return;
+async function plannerWatch() {   // one tiny call: has the admin sent something, or has my planner Sheet tab changed?
+  if (!syncOn() || SY.watchBusy) return;
   const c = syncCfg(); if (c.role === 'boss') return;
-  let j; try { j = await syncCall({ action: 'planner-stamp', name: c.name }, c); } catch { return; }
+  SY.watchBusy = true;
+  let j; try { j = await syncCall({ action: 'planner-stamp', name: c.name }, c); } catch { return; } finally { SY.watchBusy = false; }
   if (!j || !j.ok) return;
   checkReload(j.reloadAt);
+  if (j.annStamp !== undefined) {   // team script v18+: admin updates show up within seconds
+    SY.annWatch = true;
+    if (SY.annStamp === undefined) SY.annStamp = j.annStamp;
+    else if (j.annStamp !== SY.annStamp) { SY.annStamp = j.annStamp; try { await annRefresh(c); } catch (e) { console.warn('admin updates', e.message); } }
+  }
+  if (!LIVE_ON || SY.busy || document.hidden) return;
   SY.liveWatching = !!j.watching;
   if (SY.liveStamp === undefined) { SY.liveStamp = j.stamp; return; }   // first look: the regular sync reads it anyway
   if (j.stamp === SY.liveStamp) return;
@@ -3680,8 +3687,10 @@ function syncInit() {
   };
   setTimeout(() => syncNow(), 1500);
   setInterval(() => { if (!document.hidden) syncNow(); }, 60000);                   // boss: every minute; mentor: a safety resend
-  setInterval(() => { plannerWatch(); }, 20000);
-  setInterval(() => { if (document.hidden && syncOn() && syncCfg().role !== 'boss') annRefresh().catch(() => {}); }, 60000);   // tab in the background: still hear about admin updates
+  const watchLoop = async () => { await plannerWatch(); setTimeout(watchLoop, document.hidden ? 30000 : 10000); };   // every 10 s (30 s in a background tab)
+  setTimeout(watchLoop, 4000);
+  addEventListener('visibilitychange', () => { if (!document.hidden) plannerWatch(); });
+  setInterval(() => { if (!SY.annWatch && document.hidden && syncOn() && syncCfg().role !== 'boss') annRefresh().catch(() => {}); }, 60000);   // older team script: background tab still hears about admin updates
   addEventListener('focus', () => syncNow());
   addEventListener('online', () => syncNow());
   addEventListener('beforeunload', () => {
@@ -4461,7 +4470,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120000620';
+const BUILD_ID = '20261120001058';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
