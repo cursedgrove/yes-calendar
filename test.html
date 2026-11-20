@@ -2707,6 +2707,17 @@ function renderViewAs() {
   sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
   sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
+  // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
+  const sites = schoolSites();
+  let ss = $('#schoolAs');
+  if (sites.length > 1) {
+    if (!ss) {
+      ss = document.createElement('select'); ss.id = 'schoolAs'; ss.className = 'view-as'; ss.title = 'Which school';
+      sel.before(ss); ss.onchange = () => setSchoolView(ss.value);
+    }
+    ss.innerHTML = `<option value="">Both schools</option>` + sites.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    ss.value = S.mschool || ''; ss.classList.toggle('on', !!S.mschool);
+  } else if (ss) ss.remove();
 }
 // announcements: when looking at one mentor, only show what was sent to them
 function annVisible(ev) {
@@ -4577,7 +4588,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120100329';
+const BUILD_ID = '20261120100800';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
