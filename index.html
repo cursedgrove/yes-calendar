@@ -918,9 +918,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/, DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
 let STORAGE_OK = true;
 
 const nextFriday = () => { const t = new Date(); return ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + (5 - t.getDay() + 7) % 7)); };
-const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, gradeFix2: true, goalFix3: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
+const MENTOR_DEF = () => ({ students: [], calls: [], grades: [], settings: { dailyGoal: 10, weeklyGoal: 50, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '2026-11-13', gradeLast: '2026-11-13', gradeFix1: true, gradeFix2: true, goalFix3: true, goalFix4: true, closures: [{ start: '2026-11-23', end: '2026-11-27', label: 'Thanksgiving week' }] } });
 function gradeFix(st) {
   if (!st.goalFix3) { st.dailyGoal = 10; st.weeklyGoal = 50; st.countMode = 'reached'; st.goalFix3 = true; }   // IYT goal: 10 students in a day
+  if (!st.goalFix4) { st.countMode = 'attempts'; st.goalFix4 = true; }   // the goal is 10 students pulled out a day, whether or not each came in
   // an "I did them" pressed early (Nov 14 - Dec 7) didn't really finish a round: back to the last real one
   st.gradeFix2 = true;
   if (!st.gradeFix1) { st.gradeAnchor = '2026-11-13'; st.gradeLast = '2026-11-13'; st.gradeFix1 = true; }
@@ -958,7 +959,7 @@ function fixMentor(m) {
   const d = MENTOR_DEF();
   if (!m || typeof m !== 'object') return d;
   return dedupeMentor({ students: Array.isArray(m.students) ? m.students.filter(x => x && x.id).map(({ guardian, guardian_phone, ...x }) => x) : [], calls: Array.isArray(m.calls) ? m.calls.filter(x => x && x.id).map(x => ({ ...x, notes: '', method: 'in-person', outcome: x.outcome === 'reached' ? 'reached' : 'no-show' })) : [],
-    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3), gradeFix2: !!(m.settings && m.settings.gradeFix2) }) });
+    grades: Array.isArray(m.grades) ? m.grades.filter(x => x && x.id && x.student_id && DATE_RE.test(x.period || '')) : [], settings: gradeFix({ ...d.settings, ...(m.settings || {}), goalFix3: !!(m.settings && m.settings.goalFix3), goalFix4: !!(m.settings && m.settings.goalFix4), gradeFix2: !!(m.settings && m.settings.gradeFix2) }) });
 }
 
 /* Modesto City Schools 2026-2027 academic calendar (dates for 9-12 / all grades). Starred = red "important" dates. */
@@ -1711,7 +1712,7 @@ const OUT = {
 };
 const METHODS = { 'in-person': 'Pulled from class' };
 const CONTACTS = { student: 'Student' };
-const MDEF = { dailyGoal: 10, weeklyGoal: 50, countMode: 'reached', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
+const MDEF = { dailyGoal: 10, weeklyGoal: 50, countMode: 'attempts', doneMode: 'reached', everyDays: 14, gradeEvery: 14, gradeAnchor: '', closures: [] };
 
 const IS_ADMIN = !!window.YES_ADMIN;
 const Mall = () => S.mentor || { students: [], calls: [], grades: [], settings: {} };
@@ -1787,6 +1788,8 @@ const mset = () => {
   return st;
 };
 const countsGoal = c => mset().countMode === 'reached' ? c.outcome === 'reached' : true;
+// toward the goal: each student counts once a day (a no-show then a came-in later the same day is one student)
+const goalN = calls => new Set(calls.filter(countsGoal).map(c => c.student_id + '|' + c.at.slice(0, 10))).size;
 const countsDone = c => mset().doneMode === 'any' ? true : c.outcome === 'reached';
 const callsOn = d => M().calls.filter(c => c.at.slice(0, 10) === ymd(d));
 const callsIn = (a, b) => M().calls.filter(c => { const d = c.at.slice(0, 10); return d >= ymd(a) && d <= ymd(b); });
@@ -1911,12 +1914,12 @@ function pullInfo(s) {
 }
 function streak() {
   const g = +mset().dailyGoal; if (!g) return 0;
-  const met = x => callsOn(x).filter(countsGoal).length >= g;
+  const met = x => goalN(callsOn(x)) >= g;
   let d = startOfDay(new Date()), n = 0;
-  if (!met(d)) d = addDays(d, -1);
+  if (!met(d)) d = addDays(d, -1);   // today isn't over yet: start from yesterday
   for (let i = 0; i < 400; i++) {
     if (met(d)) n++;
-    else if (openDay(d)) break; // weekends and closed days never break a streak
+    else if (openDay(d) && callsOn(d).length) break;   // only a school day with some pull-outs but fewer than the goal breaks it (weekends, closed days and days off don't)
     d = addDays(d, -1);
   }
   return n;
@@ -1930,7 +1933,7 @@ function oldRing(v, goal, color) {
   return `<svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="${r}" fill="none" stroke="var(--s0)" stroke-width="7"/><circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(C * p).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 32 32)"/><text x="32" y="37" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">${Math.round(p * 100)}%</text></svg>`;
 }
 function dayHeaderNote(d, busy) {
-  const n = callsOn(d).filter(countsGoal).length;
+  const n = goalN(callsOn(d));
   return [busy ? fmtDur(busy) + ' busy' : '', n ? `${n} check-in${n > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || '&nbsp;';
 }
 
@@ -1939,8 +1942,8 @@ function renderMentor() {
   const isCur = today >= ws && today <= we, st = goalsFor(ws);
   const hasGoal = +mset().dailyGoal > 0 || +mset().weeklyGoal > 0;
   const weekClosures = closures().filter(c => c.start <= ymd(we) && c.end >= ymd(ws));
-  const week = callsIn(ws, we), weekGoalN = week.filter(countsGoal).length;
-  const todayN = callsOn(today).filter(countsGoal).length;
+  const week = callsIn(ws, we), weekGoalN = goalN(week);
+  const todayN = goalN(callsOn(today));
   const mentors = [...new Set(Mall().students.map(s => s.mentor).filter(Boolean))].sort();
   const q = (S.mq || '').toLowerCase();
   const active = M().students.filter(s => s.active !== false);
@@ -1972,7 +1975,7 @@ function renderMentor() {
     return `<div class="ms-row" data-sid="${s.id}"><div class="ms-av" style="--c:${avColor(s.name)}" data-mstu>${esc(initials(s.name))}</div><div class="ms-info" data-mstu><b>${s.flagged ? '<span class="flag">(!)</span> ' : ''}${esc(s.name)}</b><div class="sub">${adminNote(s) ? `<span class="ob note-b" style="--c:var(--yellow)" title="${esc(adminNote(s).note)}">Note</span> ` : ''}<span class="ob" style="--c:${OUT[c.outcome]?.c}">${OUT[c.outcome]?.l}</span> ${fullDay(c.at)}, ${fmtTime(parseD(c.at))}${nextDue(s) ? ` <span class="muted">·</span> <span class="next-pull">Next pull-out: <span class="np">${fmtDateShort(nextDue(s))}</span></span>` : ''}</div></div>${IS_ADMIN ? '' : '<div class="ms-acts"><button data-mlog title="Log another check-in">Log</button></div>'}</div>`;
   };
   const days = [...Array(7)].map((_, i) => addDays(ws, i));
-  const perDay = days.map(d => callsOn(d).filter(countsGoal).length);
+  const perDay = days.map(d => goalN(callsOn(d)));
   const maxDay = Math.max(+st.dailyGoal || 1, ...perDay) * 1.15;
   const log = week.slice().sort((a, b) => b.at.localeCompare(a.at));
 
@@ -1996,10 +1999,10 @@ function renderMentor() {
     ${IS_ADMIN ? teamCard(ws, we) : ''}
     <div class="m-stats">
       <div class="m-stat">${hasGoal ? ring(isCur ? todayN : 0, +st.dailyGoal, 'var(--accent)') : ''}<div><div class="lbl">Today</div><div class="big">${isCur ? todayN : '–'}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.dailyGoal}</span>` : ''}</div><div class="muted sm">${isCur ? (closedOn(today) ? 'IYT room closed today' : !hasGoal ? 'came in today' : todayN >= st.dailyGoal ? 'Goal met' : `${st.dailyGoal - todayN} more to go`) : 'Viewing another week'}</div></div></div>
-      <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more ${st.countMode === 'reached' ? 'came in' : 'check-ins'}`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
+      <div class="m-stat">${hasGoal ? ring(weekGoalN, +st.weeklyGoal, 'var(--mauve)') : ''}<div><div class="lbl">This week</div><div class="big">${weekGoalN}${hasGoal ? `<span class="muted" style="font-size:15px"> / ${st.weeklyGoal}</span>` : ''}</div><div class="muted sm">${!hasGoal ? 'came in this week' : !st.weeklyGoal ? 'room closed this week' : weekGoalN >= st.weeklyGoal ? 'Goal met' : `${st.weeklyGoal - weekGoalN} more to go`}${st.openDays < 5 && st.weeklyGoal ? ` (${st.openDays}-day week)` : ''}</div></div></div>
       <div class="m-stat">${ring(doneAll.length, active.length, 'var(--green)')}<div><div class="lbl">Up to date</div><div class="big">${doneAll.length}<span class="muted" style="font-size:15px"> / ${active.length}</span></div><div class="muted sm">${active.length - doneAll.length} due this week</div></div></div>
       <div class="m-stat ${isCur && gLeft <= 1 ? 'g-soon' : ''}"><div><div class="lbl">Grade check-ins due</div><div class="big">${DAYS[gDue.getDay()]} ${MONTHS_S[gDue.getMonth()]} ${gDue.getDate()}</div><div class="muted sm">${isCur ? (gLeft === 0 ? 'today' : gLeft === 1 ? 'tomorrow' : 'in ' + gLeft + ' days') : ''} · every ${+mset().gradeEvery || 14} days</div>${mset().gradeLast ? `<div class="muted sm">Last done ${fmtDateShort(parseD(mset().gradeLast))}</div>` : ''}${isCur && !IS_ADMIN ? (gradeRecent() ? `<div class="g-ok">✓ Completed ${fmtDateShort(gradeRecent())} <button class="linkbtn sm" id="gUndoBtn" title="Mark them not done">Undo</button></div>` : '<button class="btn sm primary" id="gDoneBtn" style="margin-top:4px">✓ I did grade check-ins</button>') : ''}</div></div>
-      ${!hasGoal ? '' : ''}<div class="m-stat" ${hasGoal ? '' : 'hidden'}><div><div class="lbl">Goal streak</div><div class="big">${streak()}<span class="muted" style="font-size:15px"> day${streak() === 1 ? '' : 's'}</span></div><div class="muted sm">days in a row hitting the daily goal</div></div></div>
+      ${!hasGoal ? '' : ''}<div class="m-stat" ${hasGoal ? '' : 'hidden'}><div><div class="lbl">Goal streak</div><div class="big">${streak()}<span class="muted" style="font-size:15px"> day${streak() === 1 ? '' : 's'}</span></div><div class="muted sm">school days in a row with ${+mset().dailyGoal} ${mset().countMode === 'reached' ? 'who came in' : 'students pulled out'}</div></div></div>
     </div>
     <div class="m-week"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Check-ins per day</b><span class="muted sm">${hasGoal ? `goal: ${st.dailyGoal}/day` : ''}</span></div>
       <div class="m-days">${st.dailyGoal ? `<div class="goal-line" style="bottom:calc(${st.dailyGoal / maxDay * 100}% * 0.78 + 22px)"></div>` : ''}${days.map((d, i) => { const v = perDay[i]; return `<div class="m-day ${v >= st.dailyGoal && v ? 'met' : v ? 'part' : ''} ${sameDay(d, today) ? 'today' : ''}" title="${fmtDateShort(d)}: ${v}"><span>${v || ''}</span><div class="b" style="height:${v / maxDay * 78}%"></div><span>${closedOn(d) ? 'closed' : DAYS[d.getDay()] + ' ' + d.getDate()}</span></div>`; }).join('')}</div></div>
@@ -2072,12 +2075,12 @@ function renderMentorCard() {
   const active = M().students.filter(s => s.active !== false);
   if (!active.length) { el.innerHTML = ''; return; }
   const today = startOfDay(new Date()), ws = startOfWeek(today), st = goalsFor(ws);
-  const t = callsOn(today).filter(countsGoal).length, w = callsIn(ws, addDays(ws, 6));
+  const t = goalN(callsOn(today)), w = callsIn(ws, addDays(ws, 6));
   const we = addDays(ws, 6), byS = new Map();
   for (const c of w) { if (!byS.has(c.student_id)) byS.set(c.student_id, []); byS.get(c.student_id).push(c); }
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
   const awayN = awayList(M().students, M().calls).length;
-  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}${+mset().dailyGoal ? '/' + st.dailyGoal : ''}</b></span><span>Week <b>${w.filter(countsGoal).length}${+mset().weeklyGoal ? '/' + st.weeklyGoal : ''}</b></span></div>${+mset().dailyGoal ? `<div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div>` : ''}<div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
+  el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}${+mset().dailyGoal ? '/' + st.dailyGoal : ''}</b></span><span>Week <b>${goalN(w)}${+mset().weeklyGoal ? '/' + st.weeklyGoal : ''}</b></span></div>${+mset().dailyGoal ? `<div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div>` : ''}<div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
   if (!IS_ADMIN) el.insertAdjacentHTML('beforeend', quickBar('side', true));
   el.onclick = e => { if (e.target.closest('[data-qbar]')) return; closeSidebar(); setView('mentor'); };
 }
@@ -2112,7 +2115,7 @@ async function quickLogNames(form, outcome) {
   const parts = inp.value.split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
   if (!parts.length) { inp.focus(); return; }
   const at = when === 'now' ? ymdhm(new Date()) : `${ymd(new Date())}T${PER_TIME[when] || '12:00'}`;
-  const before = callsOn(new Date()).filter(countsGoal).length, done = [], made = [], left = [], notes = [];
+  const before = goalN(callsOn(new Date())), done = [], made = [], left = [], notes = [];
   for (const q of parts) {
     const r = findStudent(q);
     if (r.s) {
@@ -2144,7 +2147,7 @@ document.addEventListener('click', e => {
 
 async function quickLog(sid, outcome) {
   const s = stuById(sid);
-  const before = callsOn(new Date()).filter(countsGoal).length;
+  const before = goalN(callsOn(new Date()));
   const c = await api('POST', 'calls', { student_id: sid, at: ymdhm(new Date()), method: 'in-person', contact: 'student', outcome, notes: '' });
   await reload();
   const nd = outcome === 'reached' ? nextDue(stuById(sid)) : null;
@@ -2154,9 +2157,9 @@ async function quickLog(sid, outcome) {
   
 }
 function celebrate(before) {
-  const st = goalsFor(startOfWeek(new Date())), after = callsOn(new Date()).filter(countsGoal).length;
+  const st = goalsFor(startOfWeek(new Date())), after = goalN(callsOn(new Date()));
   if (st.dailyGoal && before < st.dailyGoal && after >= st.dailyGoal) toast(`Daily goal reached (${after} today)`, { duration: 8000 });
-  const ws = startOfWeek(new Date()), wN = callsIn(ws, addDays(ws, 6)).filter(countsGoal).length;
+  const ws = startOfWeek(new Date()), wN = goalN(callsIn(ws, addDays(ws, 6)));
   if (st.weeklyGoal && wN === +st.weeklyGoal && after > before) toast(`Weekly goal reached (${wN} this week)`, { duration: 8000 });
 }
 async function deleteCall(cid) {
@@ -2188,7 +2191,7 @@ function openLog({ sid = null, call = null, preset = {} } = {}) {
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
   const save = async () => {
     const body = { student_id: +$('#l_stu').value, at: `${$('#l_d').value}T${$('#l_t').value || '12:00'}`, method: 'in-person', contact: 'student', outcome: $('#modal input[name=l_o]:checked')?.value || 'reached', notes: '' };
-    const before = callsOn(new Date()).filter(countsGoal).length;
+    const before = goalN(callsOn(new Date()));
     try { if (call) await api('PUT', 'calls/' + call.id, body); else await api('POST', 'calls', body); } catch (e) { return toast(e.message); }
     closeModal(); await reload();
     if (!call) { const nd = body.outcome === 'reached' ? nextDue(stuById(body.student_id)) : null; toast(`Check-in logged${nd ? ` · next one ${fmtDateShort(nd)}` : ''}`); celebrate(before); }
@@ -2286,7 +2289,7 @@ function openSwap(call) {
   $('#modal [data-only]').onclick = async () => { const d = await resched(); closeModal(); await reload(); toast(`${x.name} rescheduled for ${fmtDateShort(parseD(d))}`); };
   $('#modal [data-sw-save]').onclick = async () => {
     if (!pick) return;
-    const before = callsOn(new Date()).filter(countsGoal).length;
+    const before = goalN(callsOn(new Date()));
     const made = await api('POST', 'calls', { student_id: pick.id, at: call.at, method: 'in-person', contact: 'student', outcome: 'reached', notes: '' });
     const d = await resched();
     closeModal(); await reload();
@@ -2677,6 +2680,7 @@ function reportStats(name, a, b) {
   const came = inR.filter(c => c.outcome === 'reached');
   const days = []; for (let d = startOfDay(a); d <= endC; d = addDays(d, 1)) if (openDay(d)) days.push(ymd(d));
   const perDay = new Map(days.map(d => [d, 0])); for (const c of came) { const k = c.at.slice(0, 10); if (perDay.has(k)) perDay.set(k, perDay.get(k) + 1); }
+  const goalDay = new Map(days.map(d => [d, 0])); for (const k of new Set(inR.filter(countsGoal).map(c => c.at.slice(0, 10) + '|' + c.student_id))) { const d = k.slice(0, 10); if (goalDay.has(d)) goalDay.set(d, goalDay.get(d) + 1); }
   const seen = new Set(came.map(c => c.student_id));
   // days between visits, per student, over all history up to the end of the period
   const gaps = [];
@@ -2698,7 +2702,7 @@ function reportStats(name, a, b) {
     rate: inR.length ? came.length / inR.length : null, seen: seen.size, coverage: studs.length ? seen.size / studs.length : null,
     days: days.length, perDayAvg: days.length ? came.length / days.length : null, perWeekAvg: came.length / weeks,
     perStudent: studs.length ? came.length / studs.length : null, gap: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : null,
-    goal, goalDays: goal ? days.filter(d => perDay.get(d) >= goal).length : null,
+    goal, goalDays: goal ? days.filter(d => goalDay.get(d) >= goal).length : null,
     away: rows.filter(r => r.away).length, upToDate: studs.filter(s => { const d = nextDue(s); return d && d > today; }).length,
     perDay, bestDay, rows,
   };
@@ -4452,7 +4456,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120001058';
+const BUILD_ID = '20261120002958';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
