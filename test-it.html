@@ -585,6 +585,16 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .ov-ctl{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:13px}
 .ov-ctl label{display:flex;gap:4px;align-items:center;white-space:nowrap}
 #dirMsgBar{position:sticky;top:0;z-index:61;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:6px 12px;background:color-mix(in srgb,var(--accent) 22%,var(--bg));color:var(--text);font-size:13.5px;border-bottom:1px solid color-mix(in srgb,var(--accent) 45%,transparent)}
+/* Director tab: only on the Director page (and IT seeing it as the director) */
+body:not(.dir-on) #viewSeg [data-view="director"]{display:none!important}
+.dir-page{padding:16px 20px 80px;display:flex;flex-direction:column;gap:12px;max-width:1400px}
+.dir-head{justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.dir-kpis{display:flex;gap:10px;flex-wrap:wrap}
+.dir-kpis>div{display:flex;flex-direction:column;align-items:flex-start;padding:8px 14px;border-radius:12px;background:color-mix(in srgb,var(--text) 6%,transparent);min-width:96px}
+.dir-kpis b{font-size:22px;line-height:1.1}.dir-kpis b small{font-size:13px;opacity:.7}
+.dir-kpis span{font-size:12px;opacity:.75}
+.dir-tabs{margin:0!important}
+.dir-page #ov_body{padding:14px 16px}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -853,6 +863,8 @@ html,body{max-width:100%;overflow-x:hidden}
   .topbar>.view-as{min-width:64px}
 }
 @media (max-width:600px){ .topbar .seg button{padding-left:4px;padding-right:4px;font-size:11.5px} }
+/* the Director page has one more view tab: on tablets Year and Agenda make room for it */
+@media (max-width:900px){ body.dir-on #viewSeg [data-view="year"],body.dir-on #viewSeg [data-view="agenda"]{display:none!important} }
 
 </style>
 </head>
@@ -896,6 +908,7 @@ html,body{max-width:100%;overflow-x:hidden}
       <button data-view="year" title="Year (Y)">Year</button>
       <button data-view="agenda" title="Agenda (A)">Agenda</button>
       <button data-view="mentor" title="Mentoring tracker (O)">Mentoring</button>
+      <button data-view="director" title="Director dashboard">Director</button>
     </div>
     <button class="btn" id="insightsBtn" title="Time insights (I)">Stats</button>
     <button class="btn" id="themeBtn" title="Themes: seasonal looks, light and dark">Theme</button>
@@ -972,7 +985,7 @@ const HOUR = 48;
 
 const S = {
   user: null, settings: {}, calendars: [], events: [], tasks: [],
-  view: (!window.YES_ADMIN?.it && store.get('yes.adminStartView')) || 'mentor',
+  view: window.YES_ADMIN?.director ? 'director' : (!window.YES_ADMIN?.it && store.get('yes.adminStartView')) || 'mentor',
   cursor: startOfDay(new Date()), mini: null, occ: new Map(),
   dragging: false, showDone: false, modalResolve: null, booted: false, lastPointer: 'mouse',
 };
@@ -1920,7 +1933,7 @@ const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
 const adminName = () => IS_ADMIN ? (extraAdmin() || store.get(ADMIN_ME_KEY()) || 'Admin') : '';
 // another admin IT added (their own code): their own students go under their name, and they only get what IT ticked
 function extraAdmin() { if (window.YES_ADMIN?.it) return ''; const c = syncCfg(); return c.perms ? c.adminWho || '' : ''; }
-const isDirector = () => !!window.YES_ADMIN?.it ? !itAsAdmin() : syncCfg().adminRole === 'director';   // the director (and IT) get the Overview
+const isDirector = () => !!window.YES_ADMIN?.it ? itAs() !== 'admin' : syncCfg().adminRole === 'director';   // the director (and IT) get the Overview
 // the main admin's own students are saved under "Admin": show them by name
 const mentorLabel = n => sameName(n, 'Admin') && !window.YES_ADMIN?.it && syncCfg().mainName && extraAdmin() ? syncCfg().mainName + ' (admin)' : n;
 function can(what) { if (window.YES_ADMIN?.it) return true; const p = syncCfg().perms; return !p || p.includes(what); }   // "My students" are saved under Admin (or a name set before this)
@@ -1939,7 +1952,9 @@ async function applyAdminConf(conf) {
 }
 const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const meLabel = () => window.YES_ADMIN?.it && !itAsAdmin() ? "★ Admin's students" : '★ My students';   // on the IT page, "my students" are the admin's
-const itAsAdmin = () => !!window.YES_ADMIN?.it && store.get('yes.itAsAdmin') === '1';   // IT looking at the calendar the way the admin sees it
+const itAs = () => window.YES_ADMIN?.it ? ({ '1': 'admin', dir: 'dir' })[store.get('yes.itAsAdmin')] || '' : '';   // IT looking at it the way the admin / director sees it
+const itAsAdmin = () => !!itAs();
+const dirPage = () => !!window.YES_ADMIN?.director || itAs() === 'dir';   // the Director page (or IT seeing it as the director)   // IT looking at the calendar the way the admin sees it
 const ownView = () => IS_ADMIN && !!adminName() && sameName(S.mmentor, adminName());
 const TEAMV = () => IS_ADMIN && !ownView();   // the admin looking at the team (not their own students)
 let _mOwn = { key: null, val: null };
@@ -2253,7 +2268,7 @@ function renderMentor() {
     if (a === 'send') return openSend();
     if (a === 'logins') return can('logins') ? openLogins() : toast("You don't have access to logins. Ask IT.");
     if (a === 'coverage') return openCoverage();
-    if (a === 'overview') return openOverview();
+    if (a === 'overview') return dirPage() ? setView('director') : openOverview();
     if (a === 'report') return openReport();
     if (a === 'ittools') return openIT(undefined, true);
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
@@ -3323,6 +3338,24 @@ async function ovSchools(el, note = '') {
   $('#sc_add').onclick = () => { const site = $('#sc_site').value.trim(); if (!site) return toast('Type the short name'); save(site, $('#sc_full').value.trim() || site + ' High School', false, `Added ${site}.`); };
 }
 
+/* ---------- the Director page: the Overview as a full page (the "Director" tab), with the whole admin view around it ---------- */
+function renderDirector() {
+  if (!dirPage()) { S.view = 'mentor'; return renderMentor(); }
+  const tabs = [['progress', 'Progress'], ['admins', 'Admins'], ['goals', 'Goals'], ['schools', 'Schools'], ['activity', 'Activity']];
+  const who = window.YES_ADMIN?.it ? 'IT (seeing it as the director)' : syncCfg().adminWho || 'Director';
+  const st = Mall().students.filter(s => s.active !== false), ws = ymd(startOfWeek(new Date())), d14 = ymd(addDays(new Date(), -14));
+  const came = Mall().calls.filter(c => c.outcome === 'reached'), wk = new Set(came.filter(c => c.at.slice(0, 10) >= ws).map(c => c.student_id + c.at.slice(0, 10))).size;
+  const seen = new Set(came.filter(c => c.at.slice(0, 10) >= d14).map(c => c.student_id)), seenN = st.filter(s => seen.has(s.id)).length;
+  const goal = teamGoal('').weeklyGoal, mentors = teamNamesAll().filter(n => st.some(s => s.mentor === n)).length;
+  $('#main').innerHTML = `<div class="dir-page">
+    <div class="row dir-head"><div><h2 style="margin:0">Director dashboard</h2><div class="muted sm">${esc(who)} · every school · everything from the admin page is in the tabs at the top</div></div>
+      <div class="dir-kpis"><div><b>${schoolSites().length}</b><span>schools</span></div><div><b>${mentors}</b><span>mentors</span></div><div><b>${st.length}</b><span>students</span></div><div><b>${wk}${goal ? `<small> / ${goal}</small>` : ''}</b><span>came in this week</span></div><div><b>${st.length ? Math.round(seenN / st.length * 100) : 0}%</b><span>seen in 2 weeks</span></div></div></div>
+    <div class="seg it-tabs dir-tabs">${tabs.map(([k, l]) => `<button data-ovt="${k}" class="${OV.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div id="ov_body" class="card"></div></div>`;
+  $$('#main [data-ovt]').forEach(b => { b.onclick = () => { OV.tab = b.dataset.ovt; $$('#main [data-ovt]').forEach(x => x.classList.toggle('on', x === b)); ovShow(); }; });
+  ovShow();
+}
+
 /* ======================================================================== import a mentor planner (PDF or Excel) */
 // Reads the CD Mentor Planner layout: a roster table (First / Last / ID # / Period / Subject / Room / Teacher ...)
 // and a month calendar where each pulled-out student sits in a green (came in) or red (didn't) cell.
@@ -4233,7 +4266,7 @@ function checkReload(stamp) {
 // every 20 seconds: ask (cheaply) whether this mentor's planner tab changed; if it did, read it now and share the result
 /* ---------- the admin calendar: settings IT set for it, and noticing IT signed this computer out ---------- */
 async function adminWatch() {
-  if (!syncOn() || !['admin', 'admintest'].includes(loginMode()) || SY.confOff || SY.confBusy) return;
+  if (!syncOn() || !['admin', 'admintest', 'director'].includes(loginMode()) || SY.confOff || SY.confBusy) return;
   if (Date.now() - (SY.confAt || 0) < (document.hidden ? 120000 : 30000)) return;   // every 30 s is plenty
   SY.confAt = Date.now(); SY.confBusy = true;
   let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
@@ -4511,7 +4544,7 @@ if (typeof openSettings === 'function' && !IS_ADMIN) {
 const TEAM_URL = 'https://script.google.com/macros/s/AKfycbxt6Xp_QiiKgFs4ZjzWyOKMzC-7vEB2kkBBwXr32Qjenn9JtrPK6o5pf46E2V3DN-R9/exec';
 const LOGIN_KEY = 'yes.login.' + LS_KEY;
 const SESSION_CODE = 'yes.code.' + LS_KEY;
-const loginMode = () => window.YES_ADMIN ? (window.YES_ADMIN.it ? 'it' : window.YES_ADMIN.test ? 'admintest' : 'admin') : (typeof TEST_LISTS !== 'undefined' ? 'test' : 'mentor');
+const loginMode = () => window.YES_ADMIN ? (window.YES_ADMIN.it ? 'it' : window.YES_ADMIN.test ? 'admintest' : window.YES_ADMIN.director ? 'director' : 'admin') : (typeof TEST_LISTS !== 'undefined' ? 'test' : 'mentor');
 const loginInfo = () => { try { return JSON.parse(store.get(LOGIN_KEY) || 'null'); } catch { return null; } };
 const sessCode = (k = '') => { try { return sessionStorage.getItem(SESSION_CODE + k) || ''; } catch { return ''; } };
 const setSessCode = (v, k = '') => { try { v ? sessionStorage.setItem(SESSION_CODE + k, v) : sessionStorage.removeItem(SESSION_CODE + k); } catch { /* blocked */ } };
@@ -4538,10 +4571,11 @@ function loginGate() {
 function showLogin(msg) {
   const mode = loginMode(), L = loginInfo() || {}, c = syncCfg();
   const known = [...new Set([...(Mall().students || []).map(s => s.mentor).filter(Boolean), ...(L.name ? [L.name] : [])])].sort();
-  const title = { mentor: 'Mentor sign in', admin: 'Admin sign in', admintest: 'Admin sign in (test)', test: 'Test sign in', it: 'IT sign in' }[mode];
+  const title = { director: 'Director sign in', mentor: 'Mentor sign in', admin: 'Admin sign in', admintest: 'Admin sign in (test)', test: 'Test sign in', it: 'IT sign in' }[mode];
   const sub = {
     mentor: 'Use your first name and the passcode your admin gave you.',
     admin: 'Enter the admin code to see every mentor.',
+    director: 'Enter your director code (IT gives it to you). You get the director dashboard plus everything on the admin page.',
     it: 'Enter the IT code. You get everything the admin has, plus status checks, cleanup and backups.',
     admintest: 'Enter the admin code to load the real team, or just look at the sample data.',
     test: "Pick your name and your students load in. This copy never touches the real calendar.",
@@ -4598,6 +4632,7 @@ function showLogin(msg) {
       if (boss) {
         const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
+        if (mode === 'director' && !(p.role === 'boss' && p.adminRole === 'director')) throw new Error("That's not a director code. Admins sign in on the admin page.");
         if (mode !== 'it' && p.role !== 'boss' && p.role !== 'it') throw new Error("That's not the admin code.");
         syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null, adminRole: mode === 'it' ? '' : p.adminRole || '', mainName: p.mainName || '', schools: mode === 'it' ? null : p.schools || null });
         if (mode !== 'it') who = p.name || 'Admin';
@@ -4629,7 +4664,7 @@ function renderWho() {
   if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(String(L.role === 'boss' ? whoLabel() : L.name).trim().split(/\s+/)[0])}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
   if (L) b.title = (L.role === 'boss' ? whoLabel() : L.name) + (L.offline ? ' (offline)' : '');
 }
-const whoLabel = () => loginMode() === 'it' ? (itAsAdmin() ? 'Admin' : 'IT') : (syncCfg().adminWho || 'Admin');
+const whoLabel = () => loginMode() === 'it' ? (itAs() === 'dir' ? 'Director' : itAsAdmin() ? 'Admin' : 'IT') : (syncCfg().adminWho || 'Admin');
 function whoMenu() {
   const L = loginInfo() || {}, mode = loginMode();
   openModal(`<div class="m-head"><h2>${esc(L.role === 'boss' ? whoLabel() : L.name || '')}</h2><button class="iconbtn" data-x>✕</button></div>
@@ -4729,7 +4764,7 @@ async function offerPlanner() {
 /* ---------- the admin reset a mentor's passcode (or signed them out): back to the sign-in screen ---------- */
 // IT signed this admin computer out (IT tools → Admin): back to the sign-in screen
 function adminKicked() {
-  if (!['admin', 'admintest'].includes(loginMode()) || SY.kicked) return;
+  if (!['admin', 'admintest', 'director'].includes(loginMode()) || SY.kicked) return;
   SY.kicked = true;
   syncSave({ ...syncCfg(), code: '', be: '' }); setSessCode('');
   setTimeout(() => { SY.kicked = false; closeModal(); showLogin('IT signed this computer out. Sign in again with the admin code.'); }, 50);
@@ -4911,7 +4946,7 @@ async function itAdminTab(el, shown = '') {
     <div class="muted sm">Every admin can see all the mentors' calendars, the coverage grid and reports. The boxes add what else they can do. A <b>Director</b> also gets the Overview: progress for every school against the goals, each admin's activity and their students. Each new admin gets their own code and signs in on the admin page with it.</div>`
     : '<p class="muted">Adding more admins needs the team script v24.</p>'}
     <h4>See it as the admin does</h4>
-    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="ad_as">Switch to the admin's view</button><span class="muted sm">Same calendar, labeled Admin, without the IT tools. A bar at the top switches back.</span></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="ad_as">Switch to the admin's view</button><button class="btn primary" id="ad_asdir">Switch to the director's view</button><span class="muted sm">Same calendar without the IT tools, the way they see it (the director's view opens on the director dashboard). A bar at the top switches back.</span></div>
     <h4>${esc(main)}'s students</h4>
     <div class="row" style="gap:8px;flex-wrap:wrap"><span>${mine.length} student${mine.length === 1 ? '' : 's'} · ${sess.length} session${sess.length === 1 ? '' : 's'}${last ? ' · last on ' + esc(fmtDateShort(parseD(last.slice(0, 10)))) : ''}</span>
       <button class="btn" id="ad_open">Open ${esc(main)}'s students</button></div>
@@ -4940,6 +4975,7 @@ async function itAdminTab(el, shown = '') {
   $('#ad_cadd').onclick = () => { const a = $('#ad_cs').value, b = $('#ad_ce').value || a; if (!a) return toast('Pick a start date'); cl.push({ start: a <= b ? a : b, end: a <= b ? b : a, label: $('#ad_cn').value.trim() }); clTouched = true; $('#ad_cs').value = $('#ad_ce').value = $('#ad_cn').value = ''; drawCl(); };
   $('#ad_cmine').onclick = () => { cl = clone(M().settings.closures || []); clTouched = true; drawCl(); };
   $('#ad_as').onclick = () => setItAsAdmin(true);
+  $('#ad_asdir').onclick = () => setItAsAdmin('dir');
   $('#ad_open').onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs('__me__'); };
   $('#ad_code').onclick = () => openIT('security', true);
   $$('#it_body [data-adout]').forEach(b => { b.onclick = async () => { b.disabled = true; try { await itCall({ action: 'it-admin-out', dev: b.dataset.adout }); toast('Signed out. That computer goes back to the sign-in screen.'); itAdminTab(el); } catch (e) { b.disabled = false; toast(e.message); } }; });
@@ -4967,17 +5003,21 @@ async function itAdminTab(el, shown = '') {
   $('#ad_clear').onclick = () => save({});
 }
 /* IT looking at the calendar the way the admin sees it */
-function setItAsAdmin(on) {
-  store.set('yes.itAsAdmin', on ? '1' : ''); closeModal(); renderItAs(); renderWho(); renderViewAs(); render();
-  toast(on ? "Now seeing it the way the admin does." : 'Back to IT.');
+function setItAsAdmin(on) {   // on: true / 'admin' = the admin's view, 'dir' = the director's view, false = back to IT
+  const v = on === 'dir' ? 'dir' : on ? '1' : '';
+  store.set('yes.itAsAdmin', v); closeModal();
+  if (v === 'dir') S.view = 'director'; else if (S.view === 'director') S.view = 'mentor';
+  renderItAs(); renderWho(); renderViewAs(); render();
+  toast(v === 'dir' ? "Now seeing it the way the director does." : v ? "Now seeing it the way the admin does." : 'Back to IT.');
 }
 function renderItAs() {
+  document.body.classList.toggle('dir-on', dirPage());
   if (!window.YES_ADMIN?.it) return;
   let bar = $('#itAsBar');
   if (!itAsAdmin()) { bar?.remove(); document.body.classList.remove('it-as-admin'); return; }
   document.body.classList.add('it-as-admin');
   if (!bar) { bar = document.createElement('div'); bar.id = 'itAsBar'; document.body.prepend(bar); }
-  bar.innerHTML = `<span>IT · seeing the calendar the way the admin does</span><button class="btn sm" id="itAsBack">Back to IT</button>`;
+  bar.innerHTML = `<span>IT · seeing the calendar the way the ${itAs() === 'dir' ? 'director' : 'admin'} does</span><button class="btn sm" id="itAsBack">Back to IT</button>`;
   $('#itAsBack').onclick = () => setItAsAdmin(false);
 }
 function itShow() {
@@ -5294,7 +5334,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120133709';
+const BUILD_ID = '20261120135339';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
@@ -5479,7 +5519,7 @@ function showAuth(st = {}) {
 async function boot() {
   applyData(await api('GET', 'bootstrap'));
   $('#auth').hidden = true; $('#app').hidden = false;
-  if (!['day', 'week', 'month', 'year', 'agenda', 'mentor'].includes(S.view)) S.view = 'week';
+  if (!['day', '4day', 'week', 'month', 'year', 'agenda', 'mentor', 'director'].includes(S.view)) S.view = 'week';
   applyTheme();
   if (!S.booted) { S.booted = true; bindOnce(); }
   render();
@@ -5500,7 +5540,7 @@ function viewDays() {
   return days;
 }
 function viewRange() {
-  if (S.view === 'mentor') { const a = startOfWeek(S.cursor); return [a, addDays(a, 6)]; }
+  if (S.view === 'mentor' || S.view === 'director') { const a = startOfWeek(S.cursor); return [a, addDays(a, 6)]; }
   if (S.view === 'month') { const f = new Date(S.cursor.getFullYear(), S.cursor.getMonth(), 1); return [f, new Date(f.getFullYear(), f.getMonth() + 1, 0)]; }
   if (S.view === 'year') return [new Date(S.cursor.getFullYear(), 0, 1), new Date(S.cursor.getFullYear(), 11, 31)];
   if (S.view === 'agenda') return [S.cursor, addDays(S.cursor, 59)];
@@ -5511,11 +5551,11 @@ function render() {
   store.set('orbit.view', S.view);
   $$('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.view === S.view));
   renderTitle();
-  ({ month: renderMonth, week: renderTimeGrid, '4day': renderTimeGrid, day: renderTimeGrid, agenda: renderAgenda, year: renderYear, mentor: renderMentor })[S.view]();
+  ({ month: renderMonth, week: renderTimeGrid, '4day': renderTimeGrid, day: renderTimeGrid, agenda: renderAgenda, year: renderYear, mentor: renderMentor, director: renderDirector })[S.view]();
   renderSidebar();
 }
 function renderTitle() {
-  if (S.view === 'mentor') { const [a, b] = viewRange(); const t = `Mentoring · ${MONTHS_S[a.getMonth()]} ${a.getDate()} – ${a.getMonth() === b.getMonth() ? '' : MONTHS_S[b.getMonth()] + ' '}${b.getDate()}`; $('#title').textContent = t; document.title = t + ' · Yes Calendar'; return; }
+  if (S.view === 'mentor' || S.view === 'director') { const [a, b] = viewRange(); const t = `${S.view === 'director' ? 'Director' : 'Mentoring'} · ${MONTHS_S[a.getMonth()]} ${a.getDate()} – ${a.getMonth() === b.getMonth() ? '' : MONTHS_S[b.getMonth()] + ' '}${b.getDate()}`; $('#title').textContent = t; document.title = t + ' · Yes Calendar'; return; }
   const [a, b] = viewRange();
   let t;
   if (S.view === 'month') t = `${MONTHS[a.getMonth()]} ${a.getFullYear()}`;
@@ -5531,7 +5571,7 @@ function shift(dir) {
   const c = S.cursor;
   if (S.view === 'month') S.cursor = new Date(c.getFullYear(), c.getMonth() + dir, 1);
   else if (S.view === 'year') S.cursor = new Date(c.getFullYear() + dir, 0, 1);
-  else S.cursor = addDays(c, dir * ({ day: 1, '4day': 4, week: 7, agenda: 30, mentor: 7 }[S.view]));
+  else S.cursor = addDays(c, dir * ({ day: 1, '4day': 4, week: 7, agenda: 30, mentor: 7, director: 7 }[S.view]));
   render();
 }
 function setView(v) { S.view = v; closePopover(); render(); }
