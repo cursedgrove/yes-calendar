@@ -557,6 +557,15 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 /* IT page: "seeing the calendar the way the admin does" bar */
 #itAsBar{position:sticky;top:0;z-index:60;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:5px 10px;background:color-mix(in srgb,var(--peach) 22%,var(--bg));color:var(--text);font-size:13px;border-bottom:1px solid color-mix(in srgb,var(--peach) 45%,transparent)}
 #itAsBar .btn.sm{padding:2px 10px}
+/* IT tools → Admin: admins list */
+.ad-tbl td{vertical-align:top}
+.ad-perms{display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+.ad-perms label{display:flex;gap:6px;align-items:center;white-space:nowrap}
+.ad-acts{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.ad-add{margin:8px 0;padding:8px 10px;border:1px dashed var(--line, #8884);border-radius:10px;display:flex;flex-direction:column;gap:6px}
+.ad-add .ad-perms{flex-direction:row;flex-wrap:wrap;gap:4px 14px}
+.ad-code{margin:6px 0;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--green, #a6e3a1) 18%,transparent);display:flex;flex-direction:column;gap:4px}
+.ad-code code{font-size:15px;font-weight:600;letter-spacing:.5px}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -1821,7 +1830,10 @@ function setSchoolView(site) {
 }
 /* ---------- the admin's own caseload: "My students" in the mentor picker ---------- */
 const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
-const adminName = () => IS_ADMIN ? (store.get(ADMIN_ME_KEY()) || 'Admin') : '';   // "My students" are saved under Admin (or a name set before this)
+const adminName = () => IS_ADMIN ? (extraAdmin() || store.get(ADMIN_ME_KEY()) || 'Admin') : '';
+// another admin IT added (their own code): their own students go under their name, and they only get what IT ticked
+function extraAdmin() { if (window.YES_ADMIN?.it) return ''; const c = syncCfg(); return c.perms ? c.adminWho || '' : ''; }
+function can(what) { if (window.YES_ADMIN?.it) return true; const p = syncCfg().perms; return !p || p.includes(what); }   // "My students" are saved under Admin (or a name set before this)
 // settings IT set for the admin calendar (IT tools → Admin). Applied once each time IT saves; the admin can still change them after.
 async function applyAdminConf(conf) {
   const ch = {};
@@ -2094,9 +2106,9 @@ function renderMentor() {
       <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option>${can('own') ? `<option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>` : ''}${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? (can('send') ? '<button class="btn primary" data-mact="send">Send to team</button>' : '') + '<button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button>' + (can('logins') ? '<button class="btn" data-mact="logins">Logins</button>' : '') + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2140,7 +2152,7 @@ function renderMentor() {
     if (a === 'planner') return openPlannerImport();
     if (a === 'sync') return openSync();
     if (a === 'send') return openSend();
-    if (a === 'logins') return openLogins();
+    if (a === 'logins') return can('logins') ? openLogins() : toast("You don't have access to logins. Ask IT.");
     if (a === 'coverage') return openCoverage();
     if (a === 'report') return openReport();
     if (a === 'ittools') return openIT(undefined, true);
@@ -2839,7 +2851,7 @@ function renderViewAs() {
   }
   const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">${meLabel()}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = `<option value="">All mentors</option>${can('own') ? `<option value="__me__">${meLabel()}</option>` : ''}` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
   sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
   // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
@@ -3642,6 +3654,7 @@ if (window.YES_ADMIN) {
     if (!isNew && !(m && (method === 'PUT' || method === 'DELETE'))) return apiLocal(method, path, body);
     const old = m ? Mall().calls.find(c => c.id === +m[1]) : null, st = stuAny(isNew ? +body.student_id : old && old.student_id);
     if (!st || !st.src || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);   // the admin's own students sync like a mentor's
+    if (typeof can === 'function' && !can('sessions')) { toast("You don't have access to change mentors' sessions. Ask IT."); throw new Error("You don't have access to change mentors' sessions."); }
     const c = { ...(old || {}), ...(body || {}) };
     const req = { action: 'admin-call', student: st.name, by: st.src || '', date: String(c.at).slice(0, 10), time: String(c.at).slice(11, 16), result: c.outcome };
     if (old) { req.oldDate = old.at.slice(0, 10); req.oldTime = old.at.slice(11, 16); }
@@ -3932,6 +3945,15 @@ async function adminWatch() {
   if (Date.now() - (SY.confAt || 0) < (document.hidden ? 120000 : 30000)) return;   // every 30 s is plenty
   SY.confAt = Date.now(); SY.confBusy = true;
   let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
+  if (j && j.ok && j.name !== undefined) {
+    const c = syncCfg(), perms = j.perms || null;
+    if (j.name !== (c.adminWho || '') || JSON.stringify(perms) !== JSON.stringify(c.perms || null)) {
+      let raw = {}; try { raw = JSON.parse(store.get(SYNC_KEY) || '{}') || {}; } catch { raw = {}; }   // not syncCfg(): that has the session-only code in it
+      syncSave({ ...raw, adminWho: j.name, perms });
+      const L = loginInfo(); if (L) store.set(LOGIN_KEY, JSON.stringify({ ...L, name: j.name }));
+      renderWho(); renderViewAs(); render();
+    }
+  }
   const k = 'yes.adminConf.' + LS_KEY;
   if (j && j.ok && j.stamp && store.get(k) !== j.stamp) { store.set(k, j.stamp); try { await applyAdminConf(j.conf || {}); } catch (e) { reportError('admin settings', e); } }
 }
@@ -4050,6 +4072,7 @@ function adminNote(s) {
   return SY.notes.find(n => f(n.student) === f(s.name) && (!s.mentor || m1(n.mentor) === m1(s.mentor))) || SY.notes.find(n => f(n.student) === f(s.name)) || null;
 }
 async function saveAdminNote(s, text) {
+  if (typeof can === 'function' && !can('notes')) throw new Error("You don't have access to notes. Ask IT.");
   await syncCall({ action: 'note-put', mentor: s.mentor || '', student: s.name, note: text });
   SY.noteSig = null; await noteRefresh();
 }
@@ -4281,7 +4304,8 @@ function showLogin(msg) {
         const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
         if (mode !== 'it' && p.role !== 'boss' && p.role !== 'it') throw new Error("That's not the admin code.");
-        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '' });
+        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null });
+        if (mode !== 'it') who = p.name || 'Admin';
         setSessCode(remember ? '' : code);
       } else {
         const r = await syncCall({ action: 'login', name, passcode: code, device: deviceName() }, { url, role: 'mentor' });
@@ -4290,7 +4314,7 @@ function showLogin(msg) {
         syncSave({ ...prev, url, code: '', token: remember ? r.token : '', name: who, role: 'mentor', on: true, noIds: prev.noIds !== false });
         setSessCode(remember ? '' : r.token, 'token');
       }
-      store.set(LOGIN_KEY, JSON.stringify({ name: who, role: boss ? 'boss' : 'mentor', remember, at: ymd(new Date()) }));
+      store.set(LOGIN_KEY, JSON.stringify({ name: who || (boss ? 'Admin' : ''), role: boss ? 'boss' : 'mentor', remember, at: ymd(new Date()) }));
       _mOwn = { key: null, val: null };
       await reload(); done(); SY.err = ''; SY.seen && SY.seen.clear(); syncNow(true);
       toast(boss ? 'Signed in. Loading the team...' : `Hi ${who}! You're signed in.`);
@@ -4310,7 +4334,7 @@ function renderWho() {
   if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(L.role === 'boss' ? whoLabel() : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
   if (L) b.title = (L.role === 'boss' ? whoLabel() : L.name) + (L.offline ? ' (offline)' : '');
 }
-const whoLabel = () => loginMode() === 'it' && !itAsAdmin() ? 'IT' : 'Admin';
+const whoLabel = () => loginMode() === 'it' ? (itAsAdmin() ? 'Admin' : 'IT') : (syncCfg().adminWho || 'Admin');
 function whoMenu() {
   const L = loginInfo() || {}, mode = loginMode();
   openModal(`<div class="m-head"><h2>${esc(L.role === 'boss' ? whoLabel() : L.name || '')}</h2><button class="iconbtn" data-x>✕</button></div>
@@ -4569,24 +4593,36 @@ async function openIT(tab, quick) {   // quick: show what we have right away (IT
   if (!had || ['status', 'mentors'].includes(IT.tab)) itShow();   // don't redraw a tab someone may be typing in
 }
 /* ---------- IT tools → Admin: the admin's computers, their students, settings for their calendar ---------- */
-async function itAdminTab(el) {
-  el.innerHTML = '<p class="muted">Loading...</p>';
-  let r; try { r = await itCall({ action: 'it-admin' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(/Unknown action/.test(e.message) ? 'This needs the team script v23.' : e.message)}</p>`; return; }
+async function itAdminTab(el, shown = '') {
+  if (!shown) el.innerHTML = '<p class="muted">Loading...</p>';
+  let r, A = null; try { [r, A] = await Promise.all([itCall({ action: 'it-admin' }), itCall({ action: 'it-admins' }).catch(() => null)]); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(/Unknown action/.test(e.message) ? 'This needs the team script v23.' : e.message)}</p>`; return; }
   if (el.dataset.tab && el.dataset.tab !== 'admin') return;
   const me = adminName(), mine = Mall().students.filter(s => !s.src && sameName(s.mentor, me)), ids = new Set(mine.map(s => s.id));
   const sess = Mall().calls.filter(c => ids.has(c.student_id)), last = sess.map(c => c.at).sort().at(-1);
   const cf = r.conf || {}, sites = schoolSites(), v = x => x === undefined ? '' : esc(String(x));
   let cl = clone(cf.closures || []);
+  const PERMS = (A && A.perms) || [], main = (A && A.main) || 'Admin', lastOf = n => r.devices.filter(d => d.who === n).map(d => d.last).sort().at(-1) || '–';
+  const permBoxes = (has, pre = '') => `<div class="ad-perms">${PERMS.map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${has.includes(k) ? 'checked' : ''}${pre}> ${esc(l)}</label>`).join('')}</div>`;
   el.innerHTML = `
-    <h4 style="margin-top:0">See it as the admin does</h4>
+    <h4 style="margin-top:0">Admins</h4>
+    ${A ? `<table class="team-tbl ad-tbl"><thead><tr><th>Admin</th><th>Can do</th><th>Last used</th><th></th></tr></thead><tbody>
+      <tr><td><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="ad_main" value="${esc(main)}" style="min-width:150px"><button class="btn sm" id="ad_mainsave">Rename</button></div><div class="muted sm">Main admin · uses the admin code</div></td><td>Everything</td><td>${esc(lastOf(main))}</td><td></td></tr>
+      ${A.admins.map(a => `<tr data-adm="${esc(a.name)}"><td><b>${esc(a.name)}</b><div class="muted sm">added ${esc(a.made)}</div></td><td>${permBoxes(a.perms)}</td><td>${esc(a.last || '–')}</td>
+        <td><div class="ad-acts"><button class="btn sm" data-aa="save">Save access</button><button class="btn sm" data-aa="code">New code</button><button class="btn sm" data-aa="out">Sign out</button><button class="btn sm danger" data-aa="del">Remove</button></div></td></tr>`).join('')}
+    </tbody></table>
+    <div class="ad-add"><div class="row" style="gap:8px;flex-wrap:wrap"><b>Add an admin</b><input id="ad_nn" placeholder="Their name" style="flex:1;min-width:160px"><button class="btn primary" id="ad_add">Add admin</button></div>${permBoxes(['sessions', 'send', 'notes', 'own'])}</div>
+    <div id="ad_codebox">${shown}</div>
+    <div class="muted sm">Every admin can see all the mentors' calendars, the coverage grid and reports. The boxes add what else they can do. Each new admin gets their own code and signs in on the admin page with it.</div>`
+    : '<p class="muted">Adding more admins needs the team script v24.</p>'}
+    <h4>See it as the admin does</h4>
     <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="ad_as">Switch to the admin's view</button><span class="muted sm">Same calendar, labeled Admin, without the IT tools. A bar at the top switches back.</span></div>
-    <h4>Admin's students</h4>
+    <h4>${esc(main)}'s students</h4>
     <div class="row" style="gap:8px;flex-wrap:wrap"><span>${mine.length} student${mine.length === 1 ? '' : 's'} · ${sess.length} session${sess.length === 1 ? '' : 's'}${last ? ' · last on ' + esc(fmtDateShort(parseD(last.slice(0, 10)))) : ''}</span>
-      <button class="btn" id="ad_open">Open the admin's students</button></div>
+      <button class="btn" id="ad_open">Open ${esc(main)}'s students</button></div>
     <div class="muted sm">Adding, changing or deleting them here (roster, sessions) goes to the admin's own calendar too, like their other computers.</div>
-    <h4>Where the admin is signed in</h4>
-    ${r.devices.length ? `<table class="team-tbl"><thead><tr><th>Computer</th><th>Signed in</th><th>Last used</th><th></th></tr></thead><tbody>${r.devices.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.first)}</td><td>${esc(d.last)}</td><td><button class="btn sm" data-adout="${esc(d.id)}">Sign out</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No admin computers seen yet (they show up once the admin page is open with this script version).</p>'}
-    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn danger" id="ad_outall">Sign the admin out everywhere</button><button class="btn" id="ad_code">Change the admin code</button></div>
+    <h4>Where admins are signed in</h4>
+    ${r.devices.length ? `<table class="team-tbl"><thead><tr><th>Admin</th><th>Computer</th><th>Signed in</th><th>Last used</th><th></th></tr></thead><tbody>${r.devices.map(d => `<tr><td>${esc(d.who || main)}</td><td>${esc(d.name)}</td><td>${esc(d.first)}</td><td>${esc(d.last)}</td><td><button class="btn sm" data-adout="${esc(d.id)}">Sign out</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No admin computers seen yet (they show up once the admin page is open with this script version).</p>'}
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px"><button class="btn danger" id="ad_outall">Sign every admin out everywhere</button><button class="btn" id="ad_code">Change the admin code</button></div>
     <div class="muted sm">Signing out sends the admin back to the sign-in screen; the admin code still works. Lost or shared code: change it instead.</div>
     <h4>Settings for the admin's calendar</h4>
     <div class="muted sm" style="margin-bottom:6px">Leave a box blank to keep the admin's own setting. Saved settings reach the admin's calendar within about 30 seconds${r.confAt ? ` · last saved ${esc(r.confAt)}` : ''}.</div>
@@ -4611,7 +4647,25 @@ async function itAdminTab(el) {
   $('#ad_open').onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs('__me__'); };
   $('#ad_code').onclick = () => openIT('security', true);
   $$('#it_body [data-adout]').forEach(b => { b.onclick = async () => { b.disabled = true; try { await itCall({ action: 'it-admin-out', dev: b.dataset.adout }); toast('Signed out. That computer goes back to the sign-in screen.'); itAdminTab(el); } catch (e) { b.disabled = false; toast(e.message); } }; });
-  $('#ad_outall').onclick = async () => { if (!confirm('Sign the admin out on every computer? They sign in again with the admin code.')) return; try { await itCall({ action: 'it-admin-out-all' }); toast('The admin is signed out everywhere.'); itAdminTab(el); } catch (e) { toast(e.message); } };
+  const showCode = (name, code) => `<div class="ad-code"><div>Give this code to <b>${esc(name)}</b>. It's shown only this once:</div><div class="row" style="gap:8px"><code>${esc(code)}</code><button class="btn sm" data-copy="${esc(code)}">Copy</button></div><div class="muted sm">They open the admin page and put it in the Admin code box.</div></div>`;
+  const perms = box => [...box.querySelectorAll('[data-perm]:checked')].map(x => x.dataset.perm);
+  const adm = async (body, after) => { try { const j = await itCall(body); await after(j); } catch (e) { toast(e.message); } };
+  if (A) {
+    $('#ad_mainsave').onclick = () => adm({ action: 'it-admins-main', name: $('#ad_main').value }, async () => { toast('Renamed.'); itAdminTab(el); });
+    $('#ad_add').onclick = () => { const n = $('#ad_nn').value.trim(); if (!n) return toast("Type the new admin's name"); adm({ action: 'it-admins-add', name: n, perms: perms($('.ad-add')) }, async j => { await itAdminTab(el, showCode(j.name, j.code)); }); };
+    $$('#it_body [data-adm]').forEach(tr => {
+      const n = tr.dataset.adm;
+      tr.querySelectorAll('[data-aa]').forEach(b => { b.onclick = () => {
+        const a = b.dataset.aa;
+        if (a === 'save') return adm({ action: 'it-admins-perms', name: n, perms: perms(tr) }, async () => toast(`Saved. ${n}'s calendar updates within about 30 seconds.`));
+        if (a === 'code') { if (!confirm(`Make a new code for ${n}? Their old code stops working and they're signed out.`)) return; return adm({ action: 'it-admins-code', name: n }, async j => { await itAdminTab(el, showCode(j.name, j.code)); }); }
+        if (a === 'out') return adm({ action: 'it-admins-out', name: n }, async () => toast(`${n} is signed out everywhere. Their code still works.`));
+        if (a === 'del') { if (!confirm(`Remove ${n} as an admin? Their code stops working right away.`)) return; return adm({ action: 'it-admins-del', name: n }, async () => { toast(`Removed ${n}.`); itAdminTab(el); }); }
+      }; });
+    });
+    $$('#it_body [data-copy]').forEach(b => { b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Select the code and copy it'); } }; });
+  }
+  $('#ad_outall').onclick = async () => { if (!confirm('Sign every admin out on every computer? They sign in again with their code.')) return; try { await itCall({ action: 'it-admin-out-all' }); toast('The admin is signed out everywhere.'); itAdminTab(el); } catch (e) { toast(e.message); } };
   const save = async conf => { try { await itCall({ action: 'it-admin-conf', conf }); toast("Saved. The admin's calendar picks it up within about 30 seconds."); itAdminTab(el); } catch (e) { toast(e.message); } };
   $('#ad_save').onclick = () => save({ dailyGoal: $('#ad_d').value, weeklyGoal: $('#ad_w').value, everyDays: $('#ad_e').value, countMode: $('#ad_c').value, startView: $('#ad_v').value, school: $('#ad_s').value, closures: clTouched ? cl : undefined });
   $('#ad_clear').onclick = () => save({});
@@ -4944,7 +4998,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120121251';
+const BUILD_ID = '20261120125112';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
