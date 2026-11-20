@@ -566,6 +566,19 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .ad-add .ad-perms{flex-direction:row;flex-wrap:wrap;gap:4px 14px}
 .ad-code{margin:6px 0;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--green, #a6e3a1) 18%,transparent);display:flex;flex-direction:column;gap:4px}
 .ad-code code{font-size:15px;font-weight:600;letter-spacing:.5px}
+/* director Overview */
+.ov-school{margin-bottom:12px}
+.ov-kpis{display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
+.ov-spark{display:inline-flex;align-items:flex-end;gap:2px;height:24px;width:96px;position:relative;vertical-align:middle}
+.ov-spark i{flex:1;background:color-mix(in srgb,var(--text) 30%,transparent);border-radius:2px 2px 0 0}
+.ov-spark i.met{background:var(--green)}
+.ov-spark i.now{outline:1px solid var(--accent);outline-offset:1px}
+.ov-spark b{position:absolute;left:0;right:0;border-top:1px dashed var(--red)}
+.ov-admins{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px}
+.ov-admin{display:flex;flex-direction:column;gap:6px}
+.ov-acts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px}
+.ov-recent{font-size:12.5px;display:flex;flex-direction:column;gap:2px;border-top:1px solid color-mix(in srgb,var(--text) 12%,transparent);padding-top:6px}
+.chip{font-size:11px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 22%,transparent)}
 
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
@@ -786,6 +799,54 @@ html,body{max-width:100%;overflow-x:hidden}
 .qbar-sm{flex-wrap:wrap}
 .qbar-sm .qb-when{flex:0 0 62px;width:62px;min-width:0;padding-left:6px;padding-right:2px}
 .qbar-sm .btn{flex:1 1 auto;min-width:0;white-space:nowrap;padding:4px 7px}
+/* crowded top bar (admin: school + mentor pickers + name): the search box and pickers give up room first,
+   so the name button and the date title never get cut off */
+.topbar>.search{flex:0 1 190px;min-width:96px}
+.topbar>.search input{width:100%!important;min-width:0}
+.topbar>.view-as{flex:0 1 auto;min-width:86px;text-overflow:ellipsis}
+.topbar>.who-btn{flex:none}
+.topbar>.title-btn{min-width:min(120px,12vw)}
+@media (max-width:1440px){
+  .topbar .brand small{display:none}
+  .topbar .seg button{padding-left:9px;padding-right:9px}
+  #settingsBtn{font-size:0;padding:4px 8px}#settingsBtn::before{content:"⚙";font-size:15px}
+}
+@media (max-width:1180px){
+  .topbar .brand span{font-size:0}.topbar .brand span::before{content:"Yes";font-size:15px;font-weight:700}
+  #insightsBtn{font-size:0;padding:4px 8px}#insightsBtn::before{content:"📊";font-size:14px}
+  .topbar .seg button{padding-left:7px;padding-right:7px}
+  .topbar>.search{min-width:0;flex-basis:120px}
+}
+@media (max-width:1000px){ .topbar>.search{display:none} }
+@media (max-width:1280px){
+  .topbar>.title-btn{min-width:96px}
+  .topbar>.search{min-width:80px}
+  .topbar>.view-as{min-width:74px}
+  .topbar .seg button{padding-left:9px;padding-right:9px}
+}
+@media (max-width:1100px){
+  .topbar .brand small{display:none}
+  .topbar>.title-btn{min-width:80px}
+}
+@media (max-width:560px){
+  .topbar>.view-as{min-width:56px;max-width:96px}
+  .topbar>.title-btn{min-width:60px}
+  .topbar .brand{font-size:0!important;margin-right:2px}.topbar .brand::before{content:"Yes";font-size:15px;font-weight:700}
+}
+/* small screens: the school picker lives on the Mentoring tab (top-bar copy hidden), view buttons tighter */
+@media (max-width:820px){
+  #schoolAs{display:none}
+  .topbar>.title-btn{min-width:0}
+  .topbar .seg button{padding-left:6px;padding-right:6px;font-size:12.5px}
+  #todayBtn{padding-left:8px;padding-right:8px}
+}
+@media (max-width:680px){
+  .topbar{gap:4px;padding-left:6px;padding-right:6px}
+  #todayBtn{font-size:0;padding:4px 8px}#todayBtn::before{content:"◉";font-size:14px}
+  .topbar .seg button{padding-left:5px;padding-right:5px;font-size:12px}
+  .topbar>.view-as{min-width:64px}
+}
+@media (max-width:600px){ .topbar .seg button{padding-left:4px;padding-right:4px;font-size:11.5px} }
 
 </style>
 </head>
@@ -1851,6 +1912,9 @@ const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
 const adminName = () => IS_ADMIN ? (extraAdmin() || store.get(ADMIN_ME_KEY()) || 'Admin') : '';
 // another admin IT added (their own code): their own students go under their name, and they only get what IT ticked
 function extraAdmin() { if (window.YES_ADMIN?.it) return ''; const c = syncCfg(); return c.perms ? c.adminWho || '' : ''; }
+const isDirector = () => !!window.YES_ADMIN?.it ? !itAsAdmin() : syncCfg().adminRole === 'director';   // the director (and IT) get the Overview
+// the main admin's own students are saved under "Admin": show them by name
+const mentorLabel = n => sameName(n, 'Admin') && !window.YES_ADMIN?.it && syncCfg().mainName && extraAdmin() ? syncCfg().mainName + ' (admin)' : n;
 function can(what) { if (window.YES_ADMIN?.it) return true; const p = syncCfg().perms; return !p || p.includes(what); }   // "My students" are saved under Admin (or a name set before this)
 // settings IT set for the admin calendar (IT tools → Admin). Applied once each time IT saves; the admin can still change them after.
 async function applyAdminConf(conf) {
@@ -2124,9 +2188,9 @@ function renderMentor() {
       <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option>${can('own') ? `<option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>` : ''}${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option>${can('own') ? `<option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>` : ''}${mentors.filter(m => !sameName(m, adminName())).map(m => `<option value="${esc(m)}" ${S.mmentor === m ? 'selected' : ''}>${esc(mentorLabel(m))}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${TEAMV() ? (can('send') ? '<button class="btn primary" data-mact="send">Send to team</button>' : '') + '<button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button>' + (can('logins') ? '<button class="btn" data-mact="logins">Logins</button>' : '') + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? (can('send') ? '<button class="btn primary" data-mact="send">Send to team</button>' : '') + '<button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button>' + (can('logins') ? '<button class="btn" data-mact="logins">Logins</button>' : '') + (isDirector() ? '<button class="btn" data-mact="overview" title="Progress for every school, and what the admins have been doing">Overview</button>' : '') + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2172,6 +2236,7 @@ function renderMentor() {
     if (a === 'send') return openSend();
     if (a === 'logins') return can('logins') ? openLogins() : toast("You don't have access to logins. Ask IT.");
     if (a === 'coverage') return openCoverage();
+    if (a === 'overview') return openOverview();
     if (a === 'report') return openReport();
     if (a === 'ittools') return openIT(undefined, true);
     if (e.target.id === 'gDoneBtn') return gradeDoneNow();
@@ -2869,7 +2934,7 @@ function renderViewAs() {
   }
   const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option>${can('own') ? `<option value="__me__">${meLabel()}</option>` : ''}` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = `<option value="">All mentors</option>${can('own') ? `<option value="__me__">${meLabel()}</option>` : ''}` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(mentorLabel(n))}</option>`).join('');
   sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
   // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
@@ -3048,6 +3113,120 @@ function reportHTML(names, a, b, label, withList) {
   </section>
   ${S2.map(mentorPage).join('')}
   </div></body></html>`;
+}
+
+/* ---------- the director's Overview: progress for every school, the admins, and what they changed ---------- */
+const OV = { tab: 'progress', school: '', who: '', what: '' };
+async function openOverview(tab) {
+  if (tab) OV.tab = tab;
+  openModal(`<div class="m-head"><h2>Overview</h2><button class="iconbtn" data-x>✕</button></div>
+    <div class="seg it-tabs">${[['progress', 'Progress'], ['admins', 'Admins'], ['activity', 'Activity']].map(([k, l]) => `<button data-ovt="${k}" class="${OV.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="m-body" id="ov_body"><p class="muted">Loading...</p></div>`, 'lg');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  $$('#modal [data-ovt]').forEach(b => { b.onclick = () => { OV.tab = b.dataset.ovt; $$('#modal [data-ovt]').forEach(x => x.classList.toggle('on', x === b)); ovShow(); }; });
+  ovShow();
+}
+async function ovData(fresh) {
+  if (OV.data && !fresh && Date.now() - OV.at < 60000) return OV.data;
+  const j = await syncCall({ action: 'dir-overview' }); OV.data = j; OV.at = Date.now(); return j;
+}
+function ovShow() {
+  const el = $('#ov_body'); if (!el) return;
+  el.dataset.tab = OV.tab;
+  ({ progress: ovProgress, admins: ovAdmins, activity: ovActivity })[OV.tab](el);
+}
+// per mentor, week by week: students who came in (each student once a day), against the goal
+function ovMentorStats(n, weeks) {
+  const st = Mall().students.filter(s => s.mentor === n && s.active !== false), ids = new Set(st.map(s => s.id));
+  const calls = Mall().calls.filter(c => ids.has(c.student_id)), came = calls.filter(c => c.outcome === 'reached');
+  const per = weeks.map(w => { const a = ymd(w), b = ymd(addDays(w, 6)); return new Set(came.filter(c => { const d = c.at.slice(0, 10); return d >= a && d <= b; }).map(c => c.student_id + '|' + c.at.slice(0, 10))).size; });
+  const today = ymd(new Date()), d14 = ymd(addDays(new Date(), -14)), d21 = ymd(addDays(new Date(), -21));
+  const lastCame = new Map(); for (const c of came) { const d = c.at.slice(0, 10); if (d <= today && (!lastCame.has(c.student_id) || d > lastCame.get(c.student_id))) lastCame.set(c.student_id, d); }
+  const seen14 = st.filter(s => (lastCame.get(s.id) || '') >= d14).length, gone21 = st.filter(s => (lastCame.get(s.id) || '') < d21).length;
+  const g = teamGoal(n).weeklyGoal || 0, done = per.slice(0, -1), avg = done.length ? Math.round(done.reduce((a, b) => a + b, 0) / done.length * 10) / 10 : 0;
+  return { n, students: st.length, per, goal: g, avg, seen14, gone21, metWeeks: g ? done.filter(x => x >= g).length : null, last: calls.map(c => c.at).sort().pop() || '' };
+}
+function ovSpark(per, goal) {
+  const max = Math.max(goal || 0, ...per, 1);
+  return `<div class="ov-spark" title="${per.join(', ')}${goal ? ' · goal ' + goal : ''}">${per.map((v, i) => `<i style="height:${Math.max(2, Math.round(v / max * 100))}%" class="${goal && v >= goal ? 'met' : ''}${i === per.length - 1 ? ' now' : ''}"></i>`).join('')}${goal ? `<b style="bottom:${Math.round(goal / max * 100)}%"></b>` : ''}</div>`;
+}
+function ovProgress(el) {
+  const thisWk = startOfWeek(new Date()), weeks = []; for (let i = 7; i >= 0; i--) weeks.push(addDays(thisWk, -7 * i));
+  const sites = schoolSites(), pick = OV.school && sites.includes(OV.school) ? [OV.school] : sites.length ? sites : [''];
+  const all = [];
+  const block = site => {
+    const names = teamNamesAll().filter(n => (!site || siteOf(n) === site) && Mall().students.some(s => s.mentor === n && s.active !== false));
+    const rows = names.map(n => ovMentorStats(n, weeks)); all.push(...rows.map(r => ({ ...r, site })));
+    if (!rows.length) return `<div class="card ov-school"><h4>${esc(site ? schoolFull(site) : 'Team')}</h4><p class="muted">No students yet.</p></div>`;
+    const sum = k => rows.reduce((a, r) => a + r[k], 0), per = weeks.map((_, i) => rows.reduce((a, r) => a + r.per[i], 0)), goal = sum('goal');
+    const pc = (a, b) => b ? Math.round(a / b * 100) : 0, col = p => p >= 70 ? 'var(--green)' : p >= 40 ? 'var(--peach)' : 'var(--red)';
+    const now = per.at(-1), seen = pc(sum('seen14'), sum('students'));
+    return `<div class="card ov-school"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><h4 style="margin:0">${esc(site ? schoolFull(site) : 'Team')}</h4>
+      <div class="ov-kpis"><span><b>${sum('students')}</b> students</span><span><b>${now}</b>${goal ? ` / ${goal}` : ''} came in this week</span><span><b style="color:${col(seen)}">${seen}%</b> seen in 2 weeks</span><span><b style="color:${sum('gone21') ? 'var(--red)' : 'var(--green)'}">${sum('gone21')}</b> not in 3+ weeks</span></div></div>
+      <div style="overflow-x:auto"><table class="team-tbl ov-tbl"><thead><tr><th>Mentor</th><th>Students</th><th>This week</th><th>Last 8 weeks</th><th title="Average of the last 7 full weeks">Weekly avg</th><th title="Full weeks at or over the goal, of the last 7">Goal met</th><th title="Students who came in during the last 14 days">Seen in 2 wks</th><th title="Students who haven't come in for 3+ weeks">Not in 3+ wks</th><th>Last pull-out</th></tr></thead><tbody>
+      ${rows.map(r => { const p = pc(r.seen14, r.students); return `<tr><td><button class="linkbtn" data-ovm="${esc(r.n)}">${esc(mentorLabel(r.n))}</button></td><td>${r.students}</td><td><b>${r.per.at(-1)}</b>${r.goal ? ` <span class="muted sm">/ ${r.goal}</span>` : ''}</td><td>${ovSpark(r.per, r.goal)}</td><td>${r.avg}</td><td>${r.metWeeks == null ? '<span class="muted">no goal</span>' : `${r.metWeeks}/7`}</td><td><b style="color:${col(p)}">${p}%</b> <span class="muted sm">(${r.seen14})</span></td><td>${r.gone21 ? `<b style="color:var(--red)">${r.gone21}</b>` : '<span style="color:var(--green)">0</span>'}</td><td>${r.last ? relDay(r.last) : '–'}</td></tr>`; }).join('')}
+      <tr class="sb-tot"><td>All</td><td>${sum('students')}</td><td><b>${now}</b>${goal ? ` <span class="muted sm">/ ${goal}</span>` : ''}</td><td>${ovSpark(per, goal)}</td><td>${Math.round(per.slice(0, -1).reduce((a, b) => a + b, 0) / 7 * 10) / 10}</td><td></td><td>${seen}%</td><td>${sum('gone21')}</td><td></td></tr>
+      </tbody></table></div></div>`;
+  };
+  el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      ${sites.length > 1 ? `<select id="ov_sch"><option value="">${sites.length > 2 ? 'All schools' : 'Both schools'}</option>${sites.map(x => `<option value="${esc(x)}" ${OV.school === x ? 'selected' : ''}>${esc(schoolFull(x))}</option>`).join('')}</select>` : ''}
+      <span class="muted sm" style="flex:1">Weeks ${fmtDateShort(weeks[0])} – ${fmtDateShort(addDays(thisWk, 6))}. "Came in" counts each student once a day. Bars at or over the goal are green.</span>
+      <button class="btn sm" id="ov_csv">Export CSV</button><button class="btn sm" id="ov_print">Print</button></div>
+    ${pick.map(block).join('')}`;
+  if ($('#ov_sch')) $('#ov_sch').onchange = e => { OV.school = e.target.value; ovProgress(el); };
+  $$('#ov_body [data-ovm]').forEach(b => { b.onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs(b.dataset.ovm); }; });
+  $('#ov_csv').onclick = () => {
+    const head = ['School', 'Mentor', 'Students', ...weeks.map(w => 'Week of ' + ymd(w)), 'Weekly goal', 'Weekly avg', 'Goal met (of 7)', 'Seen in 2 weeks', 'Not in 3+ weeks'];
+    const rows = all.map(r => [r.site ? schoolFull(r.site) : '', mentorLabel(r.n), r.students, ...r.per, r.goal || '', r.avg, r.metWeeks ?? '', r.seen14, r.gone21]);
+    downloadText(`progress-${ymd(new Date())}.csv`, [head, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
+  };
+  $('#ov_print').onclick = () => ovPrint(el);
+}
+function ovPrint(el) {
+  const w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print');
+  w.document.write(`<!doctype html><title>Progress ${ymd(new Date())}</title><style>body{font:13px system-ui,sans-serif;margin:24px;color:#222}h4{margin:14px 0 6px}table{border-collapse:collapse;width:100%;margin-bottom:10px}th,td{border-bottom:1px solid #ddd;padding:4px 6px;text-align:left}.ov-kpis span{margin-right:14px}.ov-spark{display:inline-flex;align-items:flex-end;gap:2px;height:22px;width:90px;position:relative}.ov-spark i{flex:1;background:#999}.ov-spark i.met{background:#3a8f3a}.ov-spark b{position:absolute;left:0;right:0;border-top:1px dashed #c33}button{border:0;background:none;padding:0;font:inherit}select,.btn,.muted.sm{display:none}</style><h2>Yes Calendar · Progress · ${esc(fmtDateShort(new Date()))}</h2>${el.innerHTML}`);
+  w.document.close(); setTimeout(() => w.print(), 300);
+}
+async function ovAdmins(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let d; try { d = await ovData(); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab !== 'admins') return;
+  const wk = ymd(addDays(new Date(), -7)), thisWk = ymd(startOfWeek(new Date()));
+  const roleTxt = { main: 'Main admin', admin: 'Admin', director: 'Director' };
+  const PL = { sessions: 'sessions', send: 'Send to team', notes: 'notes', logins: 'logins', own: 'own students' };
+  el.innerHTML = `<p class="muted sm" style="margin-top:0">Each admin, when they last used the calendar, what they did in the last 7 days, and their own students. "Activity" has the full list.</p>
+    <div class="ov-admins">${d.admins.map(a => {
+      const mine = d.activity.filter(x => x.who === a.name), recent = mine.filter(x => x.at.slice(0, 10) >= wk), by = {};
+      recent.forEach(x => { by[x.what] = (by[x.what] || 0) + 1; });
+      const listName = a.role === 'main' ? 'Admin' : a.name, isMe = sameName(listName, adminName());
+      const st = Mall().students.filter(s => sameName(s.src || s.mentor, listName) && s.active !== false), ids = new Set(st.map(s => s.id));
+      const cameWk = new Set(Mall().calls.filter(c => ids.has(c.student_id) && c.outcome === 'reached' && c.at.slice(0, 10) >= thisWk).map(c => c.student_id + c.at.slice(0, 10))).size;
+      return `<div class="card ov-admin"><div class="row" style="justify-content:space-between;gap:8px"><div><b>${esc(a.name)}</b> <span class="chip">${roleTxt[a.role] || 'Admin'}</span></div><span class="muted sm">${a.last ? 'last used ' + esc(a.last) : 'not seen yet'}${a.computers ? ` · ${a.computers} computer${a.computers === 1 ? '' : 's'}` : ''}</span></div>
+        <div class="muted sm">Can: ${a.perms == null ? 'everything' : a.perms.length ? esc(a.perms.map(p => PL[p] || p).join(', ')) : 'look only'}</div>
+        <div class="ov-acts">${Object.keys(by).length ? Object.entries(by).map(([k, v]) => `<span><b>${v}</b> ${esc(k)}</span>`).join('') : '<span class="muted">Nothing changed in the last 7 days</span>'}</div>
+        ${st.length ? `<div class="row" style="gap:8px;flex-wrap:wrap"><span>${st.length} own student${st.length === 1 ? '' : 's'} · ${cameWk} came in this week</span><button class="btn sm" data-ovsee="${esc(isMe ? '__me__' : listName)}">See their students</button></div>` : ''}
+        ${mine.length ? `<div class="ov-recent">${mine.slice(0, 3).map(x => `<div><span class="muted sm">${esc(x.at)}</span> ${esc(x.what)}: ${esc(x.detail)}</div>`).join('')}</div>` : ''}
+        <button class="linkbtn sm" data-ovwho="${esc(a.name)}">All of ${esc(a.name.split(' ')[0])}'s activity →</button></div>`;
+    }).join('')}</div>`;
+  $$('#ov_body [data-ovsee]').forEach(b => { b.onclick = () => { closeModal(); if (S.view !== 'mentor') setView('mentor'); setViewAs(b.dataset.ovsee); }; });
+  $$('#ov_body [data-ovwho]').forEach(b => { b.onclick = () => { OV.who = b.dataset.ovwho; OV.what = ''; openOverview('activity'); }; });
+}
+async function ovActivity(el) {
+  el.innerHTML = '<p class="muted">Loading...</p>';
+  let d; try { d = await ovData(); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab !== 'activity') return;
+  const whos = [...new Set(d.activity.map(x => x.who))].sort(), whats = [...new Set(d.activity.map(x => x.what))].sort();
+  const list = d.activity.filter(x => (!OV.who || x.who === OV.who) && (!OV.what || x.what === OV.what));
+  el.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <select id="ov_who"><option value="">Everyone</option>${whos.map(x => `<option ${OV.who === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <select id="ov_what"><option value="">Every kind</option>${whats.map(x => `<option ${OV.what === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      <span class="muted sm" style="flex:1">${list.length} of the newest ${d.activity.length} changes (sessions, Send to team, notes, logins, admin access).</span>
+      <button class="btn sm" id="ov_ref">Refresh</button><button class="btn sm" id="ov_acsv">Export CSV</button></div>
+    ${list.length ? `<div style="overflow-x:auto"><table class="team-tbl"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th></tr></thead><tbody>${list.slice(0, 400).map(x => `<tr><td class="muted" style="white-space:nowrap">${esc(x.at)}</td><td>${esc(x.who)}</td><td>${esc(x.what)}</td><td>${esc(x.detail)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nothing yet. Changes admins make from now on show up here.</p>'}`;
+  $('#ov_who').onchange = e => { OV.who = e.target.value; ovActivity(el); };
+  $('#ov_what').onchange = e => { OV.what = e.target.value; ovActivity(el); };
+  $('#ov_ref').onclick = async () => { OV.data = null; ovActivity(el); };
+  $('#ov_acsv').onclick = () => downloadText(`admin-activity-${ymd(new Date())}.csv`, [['When', 'Who', 'What', 'Details'], ...list.map(x => [x.at, x.who, x.what, x.detail])].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
 }
 
 /* ======================================================================== import a mentor planner (PDF or Excel) */
@@ -3965,9 +4144,9 @@ async function adminWatch() {
   let j; try { j = await syncCall({ action: 'admin-conf-get' }); } catch (e) { if (/Unknown action/.test(e.message)) SY.confOff = true; return; } finally { SY.confBusy = false; }
   if (j && j.ok && j.name !== undefined) {
     const c = syncCfg(), perms = j.perms || null;
-    if (j.name !== (c.adminWho || '') || JSON.stringify(perms) !== JSON.stringify(c.perms || null)) {
+    if (j.name !== (c.adminWho || '') || JSON.stringify(perms) !== JSON.stringify(c.perms || null) || (j.adminRole || '') !== (c.adminRole || '') || (j.mainName || '') !== (c.mainName || '')) {
       let raw = {}; try { raw = JSON.parse(store.get(SYNC_KEY) || '{}') || {}; } catch { raw = {}; }   // not syncCfg(): that has the session-only code in it
-      syncSave({ ...raw, adminWho: j.name, perms });
+      syncSave({ ...raw, adminWho: j.name, perms, adminRole: j.adminRole || '', mainName: j.mainName || '' });
       const L = loginInfo(); if (L) store.set(LOGIN_KEY, JSON.stringify({ ...L, name: j.name }));
       renderWho(); renderViewAs(); render();
     }
@@ -4322,7 +4501,7 @@ function showLogin(msg) {
         const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
         if (mode !== 'it' && p.role !== 'boss' && p.role !== 'it') throw new Error("That's not the admin code.");
-        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null });
+        syncSave({ ...prev, url, code: remember ? code : '', token: '', role: 'boss', on: true, be: p.be || '', adminWho: mode === 'it' ? '' : p.name || '', perms: mode === 'it' ? null : p.perms || null, adminRole: mode === 'it' ? '' : p.adminRole || '', mainName: p.mainName || '' });
         if (mode !== 'it') who = p.name || 'Admin';
         setSessCode(remember ? '' : code);
       } else {
@@ -4349,7 +4528,7 @@ function renderWho() {
   }
   const L = loginInfo();
   b.hidden = !L;
-  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(L.role === 'boss' ? whoLabel() : L.name)}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
+  if (L) b.innerHTML = `<span class="yl-av sm" style="--c:${avColor(L.name)}">${esc(initials(L.name))}</span><span class="who-nm">${esc(String(L.role === 'boss' ? whoLabel() : L.name).trim().split(/\s+/)[0])}${L.offline ? ' <span class="muted sm">(offline)</span>' : ''}</span>`;
   if (L) b.title = (L.role === 'boss' ? whoLabel() : L.name) + (L.offline ? ' (offline)' : '');
 }
 const whoLabel = () => loginMode() === 'it' ? (itAsAdmin() ? 'Admin' : 'IT') : (syncCfg().adminWho || 'Admin');
@@ -4620,17 +4799,18 @@ async function itAdminTab(el, shown = '') {
   const cf = r.conf || {}, sites = schoolSites(), v = x => x === undefined ? '' : esc(String(x));
   let cl = clone(cf.closures || []);
   const PERMS = (A && A.perms) || [], main = (A && A.main) || 'Admin', lastOf = n => r.devices.filter(d => d.who === n).map(d => d.last).sort().at(-1) || '–';
+  const roleSel = (v, id = '') => `<select ${id ? `id="${id}"` : 'data-role'} title="Director: everything an admin sees, plus the Overview (progress for every school and what the admins have been doing)"><option value="admin" ${v !== 'director' ? 'selected' : ''}>Admin</option><option value="director" ${v === 'director' ? 'selected' : ''}>Director</option></select>`;
   const permBoxes = (has, pre = '') => `<div class="ad-perms">${PERMS.map(([k, l]) => `<label><input type="checkbox" data-perm="${k}" ${has.includes(k) ? 'checked' : ''}${pre}> ${esc(l)}</label>`).join('')}</div>`;
   el.innerHTML = `
     <h4 style="margin-top:0">Admins</h4>
     ${A ? `<table class="team-tbl ad-tbl"><thead><tr><th>Admin</th><th>Can do</th><th>Last used</th><th></th></tr></thead><tbody>
       <tr><td><div class="row" style="gap:6px;flex-wrap:nowrap"><input id="ad_main" value="${esc(main)}" style="min-width:150px"><button class="btn sm" id="ad_mainsave">Rename</button></div><div class="muted sm">Main admin · uses the admin code</div></td><td>Everything</td><td>${esc(lastOf(main))}</td><td></td></tr>
-      ${A.admins.map(a => `<tr data-adm="${esc(a.name)}"><td><b>${esc(a.name)}</b><div class="muted sm">added ${esc(a.made)}</div></td><td>${permBoxes(a.perms)}</td><td>${esc(a.last || '–')}</td>
+      ${A.admins.map(a => `<tr data-adm="${esc(a.name)}"><td><b>${esc(a.name)}</b><div class="row" style="gap:6px;margin:3px 0">${roleSel(a.role)}</div><div class="muted sm">added ${esc(a.made)}</div></td><td>${permBoxes(a.perms)}</td><td>${esc(a.last || '–')}</td>
         <td><div class="ad-acts"><button class="btn sm" data-aa="save">Save access</button><button class="btn sm" data-aa="code">New code</button><button class="btn sm" data-aa="out">Sign out</button><button class="btn sm danger" data-aa="del">Remove</button></div></td></tr>`).join('')}
     </tbody></table>
-    <div class="ad-add"><div class="row" style="gap:8px;flex-wrap:wrap"><b>Add an admin</b><input id="ad_nn" placeholder="Their name" style="flex:1;min-width:160px"><button class="btn primary" id="ad_add">Add admin</button></div>${permBoxes(['sessions', 'send', 'notes', 'own'])}</div>
+    <div class="ad-add"><div class="row" style="gap:8px;flex-wrap:wrap"><b>Add an admin</b><input id="ad_nn" placeholder="Their name" style="flex:1;min-width:160px">${roleSel('admin', 'ad_nr')}<button class="btn primary" id="ad_add">Add admin</button></div>${permBoxes(['sessions', 'send', 'notes', 'own'])}</div>
     <div id="ad_codebox">${shown}</div>
-    <div class="muted sm">Every admin can see all the mentors' calendars, the coverage grid and reports. The boxes add what else they can do. Each new admin gets their own code and signs in on the admin page with it.</div>`
+    <div class="muted sm">Every admin can see all the mentors' calendars, the coverage grid and reports. The boxes add what else they can do. A <b>Director</b> also gets the Overview: progress for every school against the goals, each admin's activity and their students. Each new admin gets their own code and signs in on the admin page with it.</div>`
     : '<p class="muted">Adding more admins needs the team script v24.</p>'}
     <h4>See it as the admin does</h4>
     <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="ad_as">Switch to the admin's view</button><span class="muted sm">Same calendar, labeled Admin, without the IT tools. A bar at the top switches back.</span></div>
@@ -4670,12 +4850,12 @@ async function itAdminTab(el, shown = '') {
   const adm = async (body, after) => { try { const j = await itCall(body); await after(j); } catch (e) { toast(e.message); } };
   if (A) {
     $('#ad_mainsave').onclick = () => adm({ action: 'it-admins-main', name: $('#ad_main').value }, async () => { toast('Renamed.'); itAdminTab(el); });
-    $('#ad_add').onclick = () => { const n = $('#ad_nn').value.trim(); if (!n) return toast("Type the new admin's name"); adm({ action: 'it-admins-add', name: n, perms: perms($('.ad-add')) }, async j => { await itAdminTab(el, showCode(j.name, j.code)); }); };
+    $('#ad_add').onclick = () => { const n = $('#ad_nn').value.trim(); if (!n) return toast("Type the new admin's name"); adm({ action: 'it-admins-add', name: n, perms: perms($('.ad-add')), adminRole: $('#ad_nr').value }, async j => { await itAdminTab(el, showCode(j.name, j.code)); }); };
     $$('#it_body [data-adm]').forEach(tr => {
       const n = tr.dataset.adm;
       tr.querySelectorAll('[data-aa]').forEach(b => { b.onclick = () => {
         const a = b.dataset.aa;
-        if (a === 'save') return adm({ action: 'it-admins-perms', name: n, perms: perms(tr) }, async () => toast(`Saved. ${n}'s calendar updates within about 30 seconds.`));
+        if (a === 'save') return adm({ action: 'it-admins-perms', name: n, perms: perms(tr), adminRole: tr.querySelector('[data-role]').value }, async () => toast(`Saved. ${n}'s calendar updates within about 30 seconds.`));
         if (a === 'code') { if (!confirm(`Make a new code for ${n}? Their old code stops working and they're signed out.`)) return; return adm({ action: 'it-admins-code', name: n }, async j => { await itAdminTab(el, showCode(j.name, j.code)); }); }
         if (a === 'out') return adm({ action: 'it-admins-out', name: n }, async () => toast(`${n} is signed out everywhere. Their code still works.`));
         if (a === 'del') { if (!confirm(`Remove ${n} as an admin? Their code stops working right away.`)) return; return adm({ action: 'it-admins-del', name: n }, async () => { toast(`Removed ${n}.`); itAdminTab(el); }); }
@@ -5016,7 +5196,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120125112';
+const BUILD_ID = '20261120131215';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
