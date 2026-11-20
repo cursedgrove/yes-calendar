@@ -1978,7 +1978,7 @@ function renderMentor() {
   const away = awayList(M().students, M().calls), awayIds = new Map(away.map(x => [x.s.id, x]));
 
   const phoneLinks = s => s.phone ? `<a href="${telHref(s.phone)}" title="Call">${esc(s.phone)}</a>` : '';
-  const acts = s => IS_ADMIN ? '' : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
+  const acts = s => IS_ADMIN ? `<div class="ms-acts"><button data-q="reached" title="Log a session for ${esc(s.mentor || 'their mentor')}">Came in</button><button data-q="no-show">Didn't come in</button><button data-mlog title="Log a different day/time">...</button></div>` : `<div class="ms-acts"><button data-q="reached">Came in</button><button data-q="no-show">Didn't come in</button>${isCur ? '<button data-absent title="Absent from school today: move to the next school day (not a no-show)">Absent</button>' : ''}<button data-mlog title="Log a different day/time">...</button></div>`;
   const needRow = s => {
     const tries = (wk.get(s.id) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), lr = lastCall(s.id, c => c.outcome === 'reached');
     const lt = tries[tries.length - 1];
@@ -2010,7 +2010,7 @@ function renderMentor() {
       <button class="btn" data-mact="goals">Goals</button>
       <button class="btn" data-mact="csv" title="Download this week's check-ins as a spreadsheet">Export week</button>
     </div>
-    ${!IS_ADMIN && M().students.length && isCur ? quickBar('main') : ''}
+    ${M().students.length && isCur ? quickBar('main') : ''}
     ${!M().students.length && IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">${S.mmentor ? `${esc(S.mmentor)} has no students synced yet.` : 'No mentors have synced yet. Make their passcodes under Logins, and their students show up here once they sign in.'}</p></div>` : ''}
     ${!M().students.length && !IS_ADMIN ? `<div class="m-hero"><h2>Mentoring</h2><p class="muted">No students yet. Add them one at a time or paste a list.</p><div class="row" style="justify-content:center"><button class="btn primary" data-mact="add">Add student</button><button class="btn" data-mact="planner">Import a planner (Excel/PDF)</button><button class="btn" data-mact="import">Paste a roster</button></div></div>` : ''}
     ${weekClosures.map(c => `<div class="m-closed"><b>IYT room closed</b> ${fmtDateShort(parseD(c.start))}${c.end !== c.start ? ' – ' + fmtDateShort(parseD(c.end)) : ''}${c.label ? ' · ' + esc(c.label) : ''}. No pull-outs those days; anyone due then moves to the next open day.</div>`).join('')}
@@ -3375,6 +3375,24 @@ function syncStatus() {
 }
 // what a mentor sends: their own students (not ones that came from the Sheet) and those students' pull-outs
 const stuAny = id => Mall().students.find(s => s.id === id);   // any student, not just the ones on screen
+/* ---------- admin view: sessions logged, edited or deleted here go to the team Sheet ----------
+ * (the mentor's calendar picks them up within seconds). If the Sheet can't be reached, nothing changes here either. */
+if (window.YES_ADMIN) {
+  const apiLocal = api;
+  api = async function (method, path, body) {
+    const m = /^calls\/(\d+)$/.exec(path || ''), isNew = path === 'calls' && method === 'POST';
+    if (!isNew && !(m && (method === 'PUT' || method === 'DELETE'))) return apiLocal(method, path, body);
+    const old = m ? Mall().calls.find(c => c.id === +m[1]) : null, st = stuAny(isNew ? +body.student_id : old && old.student_id);
+    if (!st || !syncOn() || syncCfg().role !== 'boss') return apiLocal(method, path, body);
+    const c = { ...(old || {}), ...(body || {}) };
+    const req = { action: 'admin-call', student: st.name, by: st.src || '', date: String(c.at).slice(0, 10), time: String(c.at).slice(11, 16), result: c.outcome };
+    if (old) { req.oldDate = old.at.slice(0, 10); req.oldTime = old.at.slice(11, 16); }
+    if (method === 'DELETE') { req.del = true; req.date = req.oldDate; req.time = req.oldTime; }
+    const j = await syncCall(req, syncCfg());
+    if (!j || !j.ok) throw new Error((j && j.error) || "Couldn't save to the team Sheet");
+    return apiLocal(method, path, body);
+  };
+}
 function syncPayload(c) {
   const me = (c.name || myMentor()).trim().toLowerCase(), helped = helpList().map(x => x.toLowerCase());
   const own = Mall().students.filter(s => { if (s.src) return false; const t = (s.mentor || '').trim().toLowerCase(); return !t || t === me || t.split(/\s+/)[0] === me.split(/\s+/)[0] || helped.includes(t); }), ids = new Set(own.map(s => s.id)), byId = new Map(own.map(s => [s.id, s]));
@@ -3646,6 +3664,10 @@ async function plannerWatch() {   // one tiny call: has the admin sent something
     SY.annWatch = true;
     if (SY.annStamp === undefined) SY.annStamp = j.annStamp;
     else if (j.annStamp !== SY.annStamp) { SY.annStamp = j.annStamp; try { await annRefresh(c); } catch (e) { console.warn('admin updates', e.message); } }
+  }
+  if (j.dataStamp !== undefined) {   // the admin logged or changed a session for one of my students
+    if (SY.dataStamp === undefined) SY.dataStamp = j.dataStamp;
+    else if (j.dataStamp !== SY.dataStamp) { SY.dataStamp = j.dataStamp; setTimeout(() => syncNow(true), 0); }
   }
   if (!LIVE_ON || SY.busy || document.hidden) return;
   SY.liveWatching = !!j.watching;
@@ -4474,7 +4496,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120085751';
+const BUILD_ID = '20261120092904';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
