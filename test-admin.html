@@ -747,6 +747,11 @@ html,body{max-width:100%;overflow-x:hidden}
 }
 @container (max-width:46px){ .tev .nm-short{display:none}.tev .nm-ini{display:inline}.tev b{font-size:9.5px;letter-spacing:-.4px;text-overflow:clip;margin:0 -5px;text-align:center} }
 
+/* sidebar "Who came in?" box: one row of picker + both buttons */
+.qbar-sm{flex-wrap:wrap}
+.qbar-sm .qb-when{flex:0 0 62px;width:62px;min-width:0;padding-left:6px;padding-right:2px}
+.qbar-sm .btn{flex:1 1 auto;min-width:0;white-space:nowrap;padding:4px 7px}
+
 </style>
 </head>
 <body>
@@ -2179,7 +2184,7 @@ function renderMentorCard() {
   const left = active.filter(s => !upToDate(s, we, byS.get(s.id))).length;
   const awayN = awayList(M().students, M().calls).length;
   el.innerHTML = `<div class="card mentor-card" data-gomentor><h4>Mentoring</h4><div class="row" style="justify-content:space-between"><span>Today <b>${t}${+mset().dailyGoal ? '/' + st.dailyGoal : ''}</b></span><span>Week <b>${goalN(w)}${+mset().weeklyGoal ? '/' + st.weeklyGoal : ''}</b></span></div>${+mset().dailyGoal ? `<div class="mbar"><div style="width:${Math.min(100, t / Math.max(1, st.dailyGoal) * 100)}%"></div></div>` : ''}<div class="muted sm" style="margin-top:6px">Grade check-ins due ${DAYS[gradeDue().getDay()]} ${fmtDateShort(gradeDue()).slice(5)}${(n => n === 0 ? ' (today)' : n === 1 ? ' (tomorrow)' : ` (in ${n} days)`)(dayDiff(new Date(), gradeDue()))}</div><div class="muted sm">${left ? `${left} student${left > 1 ? 's' : ''} ${left === 1 ? 'is' : 'are'} due this week` : 'Nobody else is due this week'}</div>${awayN ? `<div class="sm" style="color:var(--red)">${awayN} haven't come in for 2+ weeks</div>` : ''}</div>`;
-  if (!IS_ADMIN) el.insertAdjacentHTML('beforeend', quickBar('side', true));
+  el.insertAdjacentHTML('beforeend', quickBar('side', true));   // the admin logs sessions from here too
   el.onclick = e => { if (e.target.closest('[data-qbar]')) return; closeSidebar(); setView('mentor'); };
 }
 
@@ -4590,7 +4595,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120095454';
+const BUILD_ID = '20261120100329';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
