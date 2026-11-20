@@ -4304,9 +4304,9 @@ async function drawSchools() {
   const sites = Object.keys(j.schools || {}), m = j.mentors || {};
   box.innerHTML = `<h4 style="margin:0 0 6px">Schools</h4>
     ${sites.map(x => `<div class="row" style="justify-content:space-between;gap:8px;padding:3px 0" data-site="${esc(x)}"><span><b>${esc(x)}</b> <span class="muted sm">${esc(j.schools[x])} · ${(m[x] || []).length ? 'tabs: ' + (m[x] || []).map(esc).join(', ') : 'no mentor tabs yet'}</span></span><button class="btn sm" data-schdel title="Stop using this school (their tabs stay in the Sheet)">Remove</button></div>`).join('')}
-    ${(j.found || []).length ? `<div class="sm" style="margin-top:8px"><b>Found in the planner Sheet, not added yet:</b></div>${j.found.map(f => `<div class="row" style="justify-content:space-between;gap:8px;padding:3px 0" data-found="${esc(f.site)}"><span><b>${esc(f.site)}</b> <span class="muted sm">tabs: ${f.mentors.map(esc).join(', ')}</span></span><button class="btn sm primary" data-schadd>Add school</button></div>`).join('')}` : ''}
-    <div class="row" style="gap:8px;margin-top:8px"><input id="sch_site" placeholder="School as written in the tab names (e.g. Enochs)" style="flex:1"><input id="sch_full" placeholder="Full name (optional)" style="flex:1"><button class="btn" id="sch_go">Add school</button></div>
-    <div class="muted sm" id="sch_msg">A new school's mentors are found from tabs named <b>Name - School</b>, then they work like Davis and Johansen.</div>`;
+    ${(j.found || []).length ? `<div class="sm" style="margin-top:8px"><b>Found in the planner Sheet:</b></div>${j.found.map(f => `<div class="row" style="justify-content:space-between;gap:8px;padding:3px 0" data-found="${esc(f.site)}"><span><b>${esc(f.site)}</b> <span class="muted sm">tabs: ${f.mentors.map(esc).join(', ')}</span></span><button class="btn sm primary" data-schadd>Add school</button></div>`).join('')}` : ''}
+    <div class="row" style="gap:8px;margin-top:8px"><input id="sch_site" placeholder="School name" style="flex:1"><input id="sch_full" placeholder="Full name (optional)" style="flex:1"><button class="btn" id="sch_go">Add school</button></div>
+    <div class="muted sm" id="sch_msg">Add a school to find its mentors.</div>`;
   const save = async (site, full, remove) => {
     try { const r = await syncCall({ action: 'school-save', site, full, remove }); if (r.error) throw new Error(r.error);
       if (typeof SY !== 'undefined') SY.schoolNames = r.schools;
@@ -4335,7 +4335,7 @@ async function openLogins(made) {
       <span><button class="btn sm" data-uimp title="Bring in their students and check-ins from their planner Sheet tab again">Import from planner</button> <button class="btn sm" data-ureset title="Make a new passcode. The old one stops working.">Reset passcode</button> <button class="btn sm" data-uout title="Sign them out on every computer">Sign out</button> <button class="btn sm" data-udel>Remove</button></span></div>`).join('')}</div>` : '<p class="muted">No mentor logins yet.</p>'}
     <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
       <select id="un_school" title="Their school: their planner tab is found and imported">${loginSchools().map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')}<option value="">No planner tab</option></select><button class="btn primary" id="un_go">Make passcode</button></div>
-    <div class="muted sm">Picking the school finds their <b>Name - School</b> tab in the planner Sheet and brings in their students and check-ins right away.</div>
+    <div class="muted sm">Pick their school to bring in their students.</div>
     <div class="set-sec" id="sch_box" style="margin-top:12px"><h4 style="margin:0 0 6px">Schools</h4><div class="muted sm">Loading schools from the planner Sheet...</div></div>
     <div id="un_msg" class="muted sm"></div>
   </div>
@@ -4703,7 +4703,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120111224';
+const BUILD_ID = '20261120111509';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
