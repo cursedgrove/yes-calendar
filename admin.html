@@ -1780,7 +1780,8 @@ function myMentor() {
   return Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 }
 /* ---------- schools: each mentor's school comes from their planner tab ("Daisy - Davis", "Maria - Johansen") ---------- */
-const SCHOOL_FULL = { Davis: 'Grace M. Davis High School', Johansen: 'Johansen High School' };
+const SCHOOL_FULL0 = { Davis: 'Grace M. Davis High School', Johansen: 'Johansen High School' };
+const schoolFull = site => ((typeof SY !== 'undefined' && SY.schoolNames) || {})[site] || SCHOOL_FULL0[site] || (site ? site + ' High School' : '');
 function siteMap() {
   if (typeof SY !== 'undefined' && SY.sites) return SY.sites;
   try { const v = JSON.parse(store.get('yes.sites.' + LS_KEY) || 'null'); if (v && v.sites) { if (typeof SY !== 'undefined') { SY.sites = v.sites; SY.schoolNames = v.schools || {}; } return v.sites; } } catch { /* none yet */ }
@@ -1796,13 +1797,13 @@ const schoolSites = () => [...new Set(Object.values(siteMap()))].sort();
 const inSchool = name => !S.mschool || siteOf(name) === S.mschool;
 function mySchool() {   // for a mentor's own calendar: the school their planner tab says
   const v = (typeof SY !== 'undefined' && SY.school) || store.get('yes.school.' + LS_KEY) || '';
-  return v || SCHOOL_FULL.Davis;
+  return v || SCHOOL_FULL0.Davis;
 }
 function reportSchool() {
   if (!IS_ADMIN) return mySchool().replace(/ High School$/, '');
   const site = S.mmentor ? siteOf(S.mmentor) : S.mschool;
-  if (site) return (SCHOOL_FULL[site] || site).replace(/ High School$/, '');
-  const all = schoolSites(); return all.length ? all.map(x => (SCHOOL_FULL[x] || x).replace(/ High School$/, '')).join(' & ') : 'Grace M. Davis';
+  if (site) return schoolFull(site).replace(/ High School$/, '');
+  const all = schoolSites(); return all.length ? all.map(x => schoolFull(x).replace(/ High School$/, '')).join(' & ') : 'Grace M. Davis';
 }
 try { if (IS_ADMIN) S.mschool = store.get('yes.schoolView.' + LS_KEY) || ''; } catch { /* S not ready: set on first use */ }
 function setSchoolView(site) {
@@ -1812,24 +1813,10 @@ function setSchoolView(site) {
 }
 /* ---------- the admin's own caseload: "My students" in the mentor picker ---------- */
 const ADMIN_ME_KEY = () => 'yes.adminMe.' + LS_KEY;
-const adminName = () => (IS_ADMIN && store.get(ADMIN_ME_KEY())) || '';
+const adminName = () => IS_ADMIN ? (store.get(ADMIN_ME_KEY()) || 'Admin') : '';   // "My students" are saved under Admin (or a name set before this)
 const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const ownView = () => IS_ADMIN && !!adminName() && sameName(S.mmentor, adminName());
 const TEAMV = () => IS_ADMIN && !ownView();   // the admin looking at the team (not their own students)
-function askAdminName(then) {
-  openModal(`<div class="m-head"><h2>Your own students</h2><button class="x" data-x>×</button></div>
-  <div class="m-body"><p class="muted">Log your own mentoring sessions here like a mentor does. Your students and sessions go on the team Sheet under this name, so they show up on the scoreboard and in reports.</p>
-  <label class="field"><span>Your name (as it should show on the team list)</span><input id="am_name" value="${esc(adminName())}" placeholder="e.g. Ms. Lopez" maxlength="40"></label></div>
-  <div class="m-foot"><button class="btn" data-x>Cancel</button><button class="btn primary" id="am_go">Save</button></div>`, 'sm');
-  const go = () => {
-    const n = $('#am_name').value.trim().replace(/\s+/g, ' ');
-    if (!n) return $('#am_name').focus();
-    if (schoolTeamNames().some(x => sameName(x, n) && !sameName(x, adminName())) && !confirm(`${n} is already a mentor on the team list. Use the same name anyway? Their students and yours would mix.`)) return;
-    store.set(ADMIN_ME_KEY(), n); closeModal(); then && then(n);
-  };
-  $('#am_go').onclick = go; $('#am_name').onkeydown = e => { if (e.key === 'Enter') go(); };
-  setTimeout(() => $('#am_name')?.focus(), 50);
-}
 let _mOwn = { key: null, val: null };
 const M = () => {
   const m = Mall();
@@ -2083,8 +2070,8 @@ function renderMentor() {
     <div class="m-toolbar">
       <input id="mq" placeholder="${TEAMV() ? 'Search students, schools, mentors…' : 'Search your students…'}" value="${esc(S.mq || '')}">
       ${!IS_ADMIN && otherMentors().length ? `<select id="mhelp" title="Whose students to show">${['', ...otherMentors()].map(n => `<option value="${esc(n)}" ${helpView() === n ? 'selected' : ''}>${n ? `My students + ${esc(n)}'s` : 'Only my students'}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">Both schools</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
-      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
+      ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option><option value="__me__" ${ownView() ? 'selected' : ''}>★ My students</option>${mentors.filter(m => !sameName(m, adminName())).map(m => `<option ${S.mmentor === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
       ${TEAMV() ? '<button class="btn primary" data-mact="send">Send to team</button><button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button><button class="btn" data-mact="logins">Logins</button>' + (window.YES_ADMIN?.it ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
@@ -2726,7 +2713,7 @@ function syncWhen(x) {
 
 /* ---------- admin: look at one mentor's calendar, or everyone's ---------- */
 function setViewAs(name) {
-  if (name === '__me__') { if (!adminName()) return askAdminName(n => setViewAs(n)); name = adminName(); }
+  if (name === '__me__') name = adminName();
   S.mmentor = name || '';
   store.set('yes.viewAs.' + LS_KEY, S.mmentor);
   _mOwn = { key: null, val: null };
@@ -2745,7 +2732,7 @@ function renderViewAs() {
   }
   const names = schoolTeamNames();
   if (S.mmentor && !names.includes(S.mmentor)) names.push(S.mmentor);
-  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students${adminName() ? ' (' + esc(adminName()) + ')' : ''}</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = `<option value="">All mentors</option><option value="__me__">★ My students</option>` + names.filter(n => !sameName(n, adminName())).map(n => `<option value="${esc(n)}" ${n === S.mmentor ? 'selected' : ''}>${esc(n)}</option>`).join('');
   sel.value = ownView() ? '__me__' : (S.mmentor || '');
   sel.classList.toggle('on', !!S.mmentor);
   // school picker in the top bar, so Month/Week/Day can switch school without going to Mentoring
@@ -2756,7 +2743,7 @@ function renderViewAs() {
       ss = document.createElement('select'); ss.id = 'schoolAs'; ss.className = 'view-as'; ss.title = 'Which school';
       sel.before(ss); ss.onchange = () => setSchoolView(ss.value);
     }
-    ss.innerHTML = `<option value="">Both schools</option>` + sites.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    ss.innerHTML = `<option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>` + sites.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
     ss.value = S.mschool || ''; ss.classList.toggle('on', !!S.mschool);
   } else if (ss) ss.remove();
 }
@@ -3743,6 +3730,7 @@ async function syncNow(quiet = true) {
     if (c.role === 'boss') {
       const j = await syncCall({ action: 'pull' }, c);
       const meA = (typeof adminName === 'function' && adminName() || '').toLowerCase();
+      const hadMe = !!meA && (j.mentors || []).some(m => m.name.toLowerCase() === meA);
       if (meA) j.mentors = (j.mentors || []).filter(m => m.name.toLowerCase() !== meA);   // the admin's own students live here already (not as a team copy)
       checkReload(j.reloadAt);
       let changed = false;
@@ -3781,7 +3769,7 @@ async function syncNow(quiet = true) {
       }
       if (!window.YES_ADMIN?.test && !window.YES_ADMIN?.baseline) for (const src of new Set(Mall().students.filter(s => s.src && !names.has(s.src)).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
       if (window.YES_ADMIN?.baseline) changed = (await loadPlanners(names)) || changed;
-      if (meA) {
+      if (meA && (hadMe || Mall().students.some(s => !s.src && String(s.mentor || '').toLowerCase() === meA))) {   // only when the admin has their own students (here or on another computer)
         // team copies of the admin's own students (loaded before the name was set, or on another device): make them this device's own
         for (const src of new Set(Mall().students.filter(s => s.src && s.src.toLowerCase() === meA).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
         if (changed) await reload();
@@ -4320,6 +4308,31 @@ async function importMentorTab(name, site) {
     return { found: true, site: f.site, tab: f.tab, students: students.length, calls: calls.length, skipped: all.length - calls.length };
   } catch (e) { return { error: e.message, site }; }
 }
+/* ---------- schools: from the planner Sheet's tab names ("Maria - Enochs"); the admin adds new ones here ---------- */
+async function drawSchools() {
+  const box = $('#sch_box'); if (!box) return;
+  let j; try { j = await syncCall({ action: 'school-list' }); } catch (e) { box.innerHTML = `<h4 style="margin:0 0 6px">Schools</h4><div class="muted sm">${/Unknown action/.test(e.message) ? 'Adding schools needs the newest team script.' : esc(e.message)}</div>`; return; }
+  if (!$('#sch_box')) return;
+  if (typeof SY !== 'undefined') SY.schoolNames = j.schools || SY.schoolNames;
+  const sites = Object.keys(j.schools || {}), m = j.mentors || {};
+  box.innerHTML = `<h4 style="margin:0 0 6px">Schools</h4>
+    ${sites.map(x => `<div class="row" style="justify-content:space-between;gap:8px;padding:3px 0" data-site="${esc(x)}"><span><b>${esc(x)}</b> <span class="muted sm">${esc(j.schools[x])} · ${(m[x] || []).length ? 'tabs: ' + (m[x] || []).map(esc).join(', ') : 'no mentor tabs yet'}</span></span><button class="btn sm" data-schdel title="Stop using this school (their tabs stay in the Sheet)">Remove</button></div>`).join('')}
+    ${(j.found || []).length ? `<div class="sm" style="margin-top:8px"><b>Found in the planner Sheet, not added yet:</b></div>${j.found.map(f => `<div class="row" style="justify-content:space-between;gap:8px;padding:3px 0" data-found="${esc(f.site)}"><span><b>${esc(f.site)}</b> <span class="muted sm">tabs: ${f.mentors.map(esc).join(', ')}</span></span><button class="btn sm primary" data-schadd>Add school</button></div>`).join('')}` : ''}
+    <div class="row" style="gap:8px;margin-top:8px"><input id="sch_site" placeholder="School as written in the tab names (e.g. Enochs)" style="flex:1"><input id="sch_full" placeholder="Full name (optional)" style="flex:1"><button class="btn" id="sch_go">Add school</button></div>
+    <div class="muted sm" id="sch_msg">A new school's mentors are found from tabs named <b>Name - School</b>, then they work like Davis and Johansen.</div>`;
+  const save = async (site, full, remove) => {
+    try { const r = await syncCall({ action: 'school-save', site, full, remove }); if (r.error) throw new Error(r.error);
+      if (typeof SY !== 'undefined') SY.schoolNames = r.schools;
+      const n = (r.mentors || {})[Object.keys(r.schools).find(k => k.toLowerCase() === site.toLowerCase()) || site] || [];
+      toast(remove ? `${site} removed` : `${site} added${n.length ? `: found ${n.join(', ')}` : ' (no mentor tabs for it yet)'}`, { duration: 8000 });
+      if (typeof syncNow === 'function') syncNow(true);
+      const keep = $('#un_name') ? $('#un_name').value : ''; await openLogins(); if ($('#un_name')) $('#un_name').value = keep;
+    } catch (e) { $('#sch_msg').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`; }
+  };
+  $('#sch_go').onclick = () => { const v = $('#sch_site').value.trim(); if (!v) return $('#sch_site').focus(); save(v, $('#sch_full').value.trim()); };
+  box.querySelectorAll('[data-schadd]').forEach(b => { b.onclick = () => save(b.closest('[data-found]').dataset.found, ''); });
+  box.querySelectorAll('[data-schdel]').forEach(b => { b.onclick = () => { const x = b.closest('[data-site]').dataset.site; if (confirm(`Stop using ${x}? Its mentors' data stays on the team Sheet, and you can add it back any time.`)) save(x, '', true); }; });
+}
 async function openLogins(made) {
   if (!syncOn()) return toast('Sign in with the admin code first.');
   let users = [];
@@ -4336,6 +4349,7 @@ async function openLogins(made) {
     <div class="row" style="gap:8px;margin-top:6px"><input id="un_name" list="un_names" placeholder="Mentor's first name" style="flex:1"><datalist id="un_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
       <select id="un_school" title="Their school: their planner tab is found and imported">${loginSchools().map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('')}<option value="">No planner tab</option></select><button class="btn primary" id="un_go">Make passcode</button></div>
     <div class="muted sm">Picking the school finds their <b>Name - School</b> tab in the planner Sheet and brings in their students and check-ins right away.</div>
+    <div class="set-sec" id="sch_box" style="margin-top:12px"><h4 style="margin:0 0 6px">Schools</h4><div class="muted sm">Loading schools from the planner Sheet...</div></div>
     <div id="un_msg" class="muted sm"></div>
   </div>
   <div class="m-foot"><button class="btn" data-x>Done</button></div>`, 'lg');
@@ -4361,6 +4375,7 @@ async function openLogins(made) {
     toast(importMsg(n, site, res), { duration: 10000 });
   }; });
   $('#un_name').onkeydown = e => { if (e.key === 'Enter') $('#un_go').click(); };
+  drawSchools();
   if (made && made.imported) $('#un_msg').innerHTML = esc(importMsg(made.name, made.imported.site, made.imported));
   $$('#modal [data-ureset]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; if (confirm(`Reset ${n}'s passcode? Their old one stops working and they'll be signed out until they enter the new one.`)) run({ action: 'user-new', name: n }, r => openLogins(r)); }; });
   $$('#modal [data-uout]').forEach(b => { b.onclick = () => { const n = b.closest('[data-un]').dataset.un; run({ action: 'user-signout', name: n }, () => { toast(`${n} is signed out everywhere. Their passcode still works.`); openLogins(); }); }; });
@@ -4701,7 +4716,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120104307';
+const BUILD_ID = '20261120110126';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
