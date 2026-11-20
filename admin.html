@@ -654,6 +654,7 @@ html,body{max-width:100%;overflow-x:hidden}
 .topbar{min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .topbar::-webkit-scrollbar{display:none}
 .topbar>*{flex:none}
+.topbar>.spacer{flex:1 1 0;min-width:0}
 .title-btn{min-width:0;flex:0 1 auto!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who-btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;max-width:200px}
 .who-nm{overflow:hidden;text-overflow:ellipsis}
@@ -707,7 +708,7 @@ html,body{max-width:100%;overflow-x:hidden}
   .topbar{gap:4px;padding:0 6px}
   .title-btn{font-size:14px!important;max-width:42vw}
   #settingsBtn{font-size:0;padding:4px 8px}#settingsBtn::before{content:"⚙";font-size:15px}
-  .view-as{max-width:96px;font-size:12px}
+  .view-as{max-width:86px;font-size:12px;padding-left:4px;padding-right:2px}
   .topbar>.seg{background:var(--topbar,var(--mantle));border:1px solid rgba(255,255,255,.25);padding:3px;border-radius:10px;gap:2px;left:8px!important;right:8px;transform:none!important;justify-content:center;max-width:none;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap}
   .topbar>.seg button{flex:none;padding:5px 9px;font-size:12px}
   .tg-head,.tg-allday{grid-template-columns:44px repeat(var(--n),minmax(0,1fr))}
@@ -4455,7 +4456,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119233431';
+const BUILD_ID = '20261119234343';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
