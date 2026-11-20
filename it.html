@@ -520,6 +520,9 @@ html[data-season]:not([data-season=""]) .topbar .who-btn{color:var(--topbar-text
 .g-ok .linkbtn{font-weight:400}
 .ms-info .next-pull{color:var(--sub)}.ms-info .next-pull .np{color:var(--text);font-weight:600}
 
+.gc-box{border:1px solid var(--s1);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--mantle)}
+.gc-box ol li{margin:2px 0}
+
 /* ---- plain look (less "designed") ---- */
 html,body{font:13px/1.45 "Segoe UI",Tahoma,Verdana,Arial,sans-serif}
 :root,[data-theme]{--shadow:0 2px 8px rgba(0,0,0,.3)}
@@ -1111,6 +1114,33 @@ async function api(method, path, body = {}) {
     DB.events = DB.events.filter(e => !e.ann_id || keep.has(e.ann_id));
     const after = JSON.stringify(DB.events.filter(e => e.ann_id).map(e => [e.ann_id, e.title, e.start, e.end, e.description, e.reminders]));
     saveDB(); return { changed: before !== after, count: keep.size };
+  }
+  if (res === 'gcal-sync' && method === 'POST') {
+    // the mentor's own Google Calendar: its events live in their own read-only calendar, replaced as a set each time
+    const items = Array.isArray(body.items) ? body.items.slice(0, 800) : [];
+    let cal = DB.calendars.find(c => c.gcal);
+    if (!body.calendar) {   // disconnected
+      if (cal) { DB.events = DB.events.filter(e => !e.gcal_id); DB.calendars = DB.calendars.filter(c => c !== cal); saveDB(); return { changed: true, count: 0 }; }
+      return { changed: false, count: 0 };
+    }
+    let changed = false;
+    if (!cal) { cal = { id: nid(), name: 'Google Calendar', color: '#4285f4', visible: true, position: DB.calendars.length, gcal: true }; DB.calendars.push(cal); changed = true; }
+    const sig = () => JSON.stringify(DB.events.filter(e => e.gcal_id).map(e => [e.gcal_id, e.title, e.start, e.end, e.location, e.description]).sort());
+    const before = sig(), keep = new Set();
+    for (const it of items) {
+      if (!it || !it.id) continue;
+      const all = !!it.allDay;
+      const data = { title: String(it.title || '(Busy)'), all_day: all, start: String(it.start || ''), end: String(it.end || it.start || ''), calendar_id: cal.id,
+        location: String(it.location || ''), description: String(it.description || ''), status: 'busy' };
+      let ev; try { ev = cleanEvent(data); } catch { continue; }
+      keep.add(String(it.id));
+      const i = DB.events.findIndex(e => e.gcal_id === String(it.id));
+      if (i >= 0) DB.events[i] = { ...DB.events[i], ...cleanEvent(data, DB.events[i]), updated: nowStamp() };
+      else DB.events.push({ id: nid(), ...ev, gcal_id: String(it.id), created: nowStamp(), updated: nowStamp() });
+    }
+    DB.events = DB.events.filter(e => !e.gcal_id || keep.has(e.gcal_id));
+    changed = changed || before !== sig();
+    saveDB(); return { changed, count: keep.size };
   }
   if (res === 'team-import' && method === 'POST') {
     // another mentor's students from the shared Google Sheet: replaces what came from them last time
@@ -3358,6 +3388,40 @@ async function plannerLiveSync(c, force = false, dry = false) {
   if (changed) { await reload(); if ($('#modalWrap').hidden) render(); }
   return changed;
 }
+/* ---------- the mentor's own Google Calendar (read only), every 5 minutes ---------- */
+const GCAL_EVERY = 5 * 60000;
+async function gcalRefresh(c, force = false) {
+  if (!force && Date.now() - (SY.gcalAt || 0) < GCAL_EVERY) return;
+  SY.gcalAt = Date.now();
+  let j; try { j = await syncCall({ action: 'gcal-get', name: c.name }, c); } catch (e) { if (/Unknown action|Only the admin/.test(e.message)) return; throw e; }
+  SY.gcal = { calendar: j.calendar || '', name: j.name || '', shareWith: j.shareWith || '', error: j.error || '', count: (j.items || []).length, at: new Date() };
+  if (j.error) return;   // not shared (any more): keep what we had
+  const r = await api('POST', 'gcal-sync', { calendar: j.calendar || '', items: j.items || [] });
+  if (r.changed) { if ($('#modalWrap').hidden && $('#popover').hidden) await reload(); else SY.reloadLater = true; }
+}
+function gcalSettingsHTML() {
+  const g = SY.gcal || {}, me = g.shareWith || 'the IYT calendar account';
+  return `<div class="gc-box" id="gcBox"><h3 style="margin:0 0 6px">Google Calendar</h3>
+    <div class="muted sm" id="gc_status">${g.calendar ? (g.error ? `<span style="color:var(--red)">Can't see ${esc(g.calendar)} any more. Share it again (steps below).</span>` : `Showing <b>${esc(g.name || g.calendar)}</b> · ${g.count} event${g.count === 1 ? '' : 's'} · read only, updates every 5 minutes`) : 'Show the meetings and events from your Google Calendar on this calendar.'}</div>
+    <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><input id="gc_id" type="email" placeholder="Your work email (the calendar's address)" value="${esc(g.calendar || '')}" style="flex:1;min-width:220px">
+      <button class="btn primary" id="gc_go">${g.calendar ? 'Update' : 'Connect'}</button>${g.calendar ? '<button class="btn" id="gc_off">Disconnect</button>' : ''}</div>
+    <details style="margin-top:8px"${g.calendar && !g.error ? '' : ' open'}><summary class="sm">How to share it (once)</summary><ol class="sm" style="margin:6px 0 0;padding-left:18px">
+      <li>Open <b>Google Calendar</b> on a computer, click the gear, then <b>Settings</b>.</li>
+      <li>On the left under <b>Settings for my calendars</b>, click your name.</li>
+      <li>In <b>Share with specific people or groups</b>, click <b>Add people</b>, type <b>${esc(me)}</b>, choose <b>See all event details</b>, and press <b>Send</b>.</li>
+      <li>Come back here, type your email above and press <b>Connect</b>.</li></ol></details></div>`;
+}
+function gcalBind() {
+  const c = syncCfg();
+  const go = async id => {
+    $('#gc_status').textContent = 'Checking...';
+    try { await syncCall({ action: 'gcal-set', name: c.name, calendar: id }, c); await gcalRefresh(c, true); SY.reloadLater = false; await reload(); toast(id ? 'Google Calendar connected' : 'Google Calendar disconnected'); }
+    catch (e) { $('#gc_status').innerHTML = `<span style="color:var(--red)">${esc(e.message)}</span>`; return; }
+    const box = $('#gcBox'); if (box) { box.outerHTML = gcalSettingsHTML(); gcalBind(); }
+  };
+  $('#gc_go') && ($('#gc_go').onclick = () => go($('#gc_id').value.trim()));
+  $('#gc_off') && ($('#gc_off').onclick = () => go(''));
+}
 async function syncNow(quiet = true) {
   if (!syncOn() || SY.busy) return;
   const c = syncCfg();
@@ -3408,6 +3472,7 @@ async function syncNow(quiet = true) {
       if (LIVE_ON) try { await plannerLiveSync(c, !quiet); } catch (e) { console.warn('planner sheet', e.message); }
       await mentorSync(c);
       await annRefresh(c);
+      try { await gcalRefresh(c, !quiet); } catch (e) { console.warn('google calendar', e.message); }
     }
     SY.last = new Date(); SY.err = '';
     if (!quiet) toast(c.role === 'boss' ? 'Up to date with the team' : 'Sent to the team sheet');
@@ -3599,6 +3664,19 @@ async function loadPlanners(realNames) {
     SY.planLoaded.add(p.name); SY.seen.delete(p.name); changed = true;
   }
   return changed;
+}
+
+// Settings: a "Google Calendar" section for mentors
+if (typeof openSettings === 'function' && !IS_ADMIN) {
+  const _openSettings = openSettings;
+  openSettings = function () {
+    _openSettings();
+    const c = syncCfg();
+    if (!syncOn() || c.role === 'boss') return;
+    const body = $('#modal .m-body'); if (!body) return;
+    body.insertAdjacentHTML('afterbegin', gcalSettingsHTML()); gcalBind();
+    if (!SY.gcal) gcalRefresh(c, true).then(() => { const box = $('#gcBox'); if (box) { box.outerHTML = gcalSettingsHTML(); gcalBind(); } }).catch(() => {});
+  };
 }
 
 /* ======================================================================== sign in */
@@ -3988,7 +4066,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261119154648';
+const BUILD_ID = '20261119223016';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
@@ -4330,7 +4408,7 @@ function chipHTML(o, d) {
   const ev = o.ev, c = evColor(ev), past = o.end < new Date();
   if (isAllDayish(o)) {
     const cont = !sameDay(o.start, d);
-    return `<div class="chip allday ${ev.holiday ? 'holiday' : ''} ${past ? 'past' : ''}" style="--c:${c}" data-key="${esc(o.key)}" draggable="${!ev.holiday}" title="${esc(ev.title)}"><span class="n">${cont ? '↳ ' : ''}${ev.starred ? '★ ' : ''}${esc(ev.title)}</span></div>`;
+    return `<div class="chip allday ${ev.holiday ? 'holiday' : ''} ${past ? 'past' : ''}" style="--c:${c}" data-key="${esc(o.key)}" draggable="${!ev.holiday && !ev.gcal_id}" title="${esc(ev.title)}"><span class="n">${cont ? '↳ ' : ''}${ev.starred ? '★ ' : ''}${esc(ev.title)}</span></div>`;
   }
   return `<div class="chip ${past ? 'past' : ''}" style="--c:${c}" data-key="${esc(o.key)}" draggable="true" title="${esc(ev.title)}"><span class="dot"></span><span class="t">${fmtTime(o.start)}</span><span class="n">${ev.starred ? '★ ' : ''}${esc(ev.title)}</span></div>`;
 }
@@ -4498,7 +4576,7 @@ function bindGrid(days) {
       S.dragging = false;
       if (o) {
         if (!moved) return showPopover(o, evEl);
-        if (o.ev.holiday) return render();
+        if (o.ev.holiday || o.ev.gcal_id) return render();
         if (resize) {
           const ne = addMin(o.end, p.min - p0.min);
           return moveOcc(o, o.start, ne > addMin(o.start, 15) ? ne : addMin(o.start, 15));
@@ -4589,7 +4667,7 @@ function showPopover(o, anchor) {
   else when = `${fmtDateShort(o.start)} ${fmtTime(o.start)} – ${fmtDateShort(o.end)} ${fmtTime(o.end)}`;
   const call = (ev.location + ' ' + ev.description).match(CALL_RE)?.[0];
   const until = o.start - new Date();
-  const tools = ev.holiday ? '' : `<button class="iconbtn" data-a="edit" title="Edit (E)">✎</button><button class="iconbtn" data-a="dup" title="Duplicate">⧉</button><button class="iconbtn" data-a="star" title="${ev.starred ? 'Remove countdown' : 'Add countdown'}">${ev.starred ? '★' : '☆'}</button><button class="iconbtn" data-a="ics" title="Download .ics">⬇</button><button class="iconbtn" data-a="del" title="Delete (Del)">🗑</button>`;
+  const tools = ev.holiday ? '' : ev.gcal_id ? '<button class="iconbtn" data-a="ics" title="Download .ics">⬇</button>' : `<button class="iconbtn" data-a="edit" title="Edit (E)">✎</button><button class="iconbtn" data-a="dup" title="Duplicate">⧉</button><button class="iconbtn" data-a="star" title="${ev.starred ? 'Remove countdown' : 'Add countdown'}">${ev.starred ? '★' : '☆'}</button><button class="iconbtn" data-a="ics" title="Download .ics">⬇</button><button class="iconbtn" data-a="del" title="Delete (Del)">🗑</button>`;
   p.innerHTML = `<div class="pop-tools">${tools}<button class="iconbtn" data-a="close" title="Close (Esc)">✕</button></div>
   <div class="pop-body">
     <div class="pop-title" style="--c:${evColor(ev)}"><div class="sq"></div><div><h3>${esc(ev.title)}</h3><div class="muted sm" style="margin-top:3px">${when}</div>${until > 0 && until < 864e5 * 60 ? `<div class="sm" style="color:var(--accent);margin-top:2px">Starts ${fmtCountdown(until)}</div>` : ''}</div></div>
@@ -4600,7 +4678,7 @@ function showPopover(o, anchor) {
     ${ev.description ? `<div class="pop-row"><span class="ic">≡</span><span class="desc">${linkify(ev.description)}</span></div>` : ''}
     ${ev.checklist?.length ? `<div class="pop-row"><span class="ic">☑</span><div style="flex:1">${ev.checklist.map((c, i) => `<label class="cl-item ${c.done ? 'done' : ''}"><input type="checkbox" data-ci="${i}" ${c.done ? 'checked' : ''}><span>${esc(c.text)}</span></label>`).join('')}</div></div>` : ''}
     ${ev.reminders?.length ? `<div class="pop-row"><span class="ic">🔔</span><span>${ev.reminders.map(m => m ? fmtRem(m) + ' before' : 'At start').join(', ')}</span></div>` : ''}
-    <div class="pop-row"><span class="ic">📅</span><span>${ev.holiday ? 'US holidays' : esc(cal?.name || '')}${ev.status === 'free' ? ' · Shown as free' : ''}</span></div>
+    <div class="pop-row"><span class="ic">📅</span><span>${ev.holiday ? 'US holidays' : ev.gcal_id ? 'From your Google Calendar · change it there' : esc(cal?.name || '')}${ev.status === 'free' ? ' · Shown as free' : ''}</span></div>
   </div>`;
   placeFloating(p, anchor.getBoundingClientRect());
   p.onclick = async e => {
@@ -4722,7 +4800,7 @@ async function applyScoped(t, occ, scope, data) {
 async function moveOcc(o, ns, ne) {
   const ev = o.ev;
   if (ev.holiday) return render();
-  if (ev.dueFor || ev.gradeDue || ev.closedRange) return render();
+  if (ev.dueFor || ev.gradeDue || ev.closedRange || ev.gcal_id) return render();
   if (ev.checkin) { await api('PUT', 'calls/' + ev.callId, { at: ymdhm(ns) }); await reload(); return toast('Check-in moved'); }
   const data = { ...pickEvent(ev), start: o.allDay ? ymd(ns) : ymdhm(ns), end: o.allDay ? ymd(addDays(ne, -1)) : ymdhm(ne) };
   if (!ev.rrule) return tx('Event moved', t => t.put(ev.id, data));
@@ -5388,8 +5466,8 @@ function bindOnce() {
     if (e.key === 'Escape') { if (!$('#modalWrap').hidden) closeModal(); else closePopover(); return; }
     const tag = (e.target.tagName || '').toLowerCase();
     if (['input', 'textarea', 'select'].includes(tag) || e.ctrlKey || e.metaKey || e.altKey || !$('#modalWrap').hidden || $('#app').hidden) return;
-    if ((e.key === 'Delete' || e.key === 'Backspace') && S.popOcc && !S.popOcc.ev.holiday) { e.preventDefault(); deleteOcc(S.popOcc); return; }
-    if (e.key.toLowerCase() === 'e' && S.popOcc && !S.popOcc.ev.holiday) { e.preventDefault(); openEditor({ occ: S.popOcc }); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && S.popOcc && !S.popOcc.ev.holiday && !S.popOcc.ev.gcal_id) { e.preventDefault(); deleteOcc(S.popOcc); return; }
+    if (e.key.toLowerCase() === 'e' && S.popOcc && !S.popOcc.ev.holiday && !S.popOcc.ev.gcal_id) { e.preventDefault(); openEditor({ occ: S.popOcc }); return; }
     const map = {
       t: goToday, j: () => shift(1), n: () => shift(1), arrowright: () => shift(1), k: () => shift(-1), p: () => shift(-1), arrowleft: () => shift(-1),
       d: () => setView('day'), w: () => setView('week'), m: () => setView('month'), y: () => setView('year'), a: () => setView('agenda'),
