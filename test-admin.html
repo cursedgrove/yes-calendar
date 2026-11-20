@@ -3596,8 +3596,10 @@ function reportError(where, err) {
     syncCall({ action: 'log-error', where, message, device: deviceName() + ' · ' + (document.title.match(/Yes Calendar[^·]*$/) || [''])[0] }).catch(() => {});
   } catch { /* never let reporting cause a problem */ }
 }
-addEventListener('error', e => { if (e && e.message && !/ResizeObserver|Script error/.test(e.message)) reportError('page', e.message + (e.lineno ? ` (line ${e.lineno})` : '')); });
-addEventListener('unhandledrejection', e => reportError('page', e && e.reason));
+// which part of the code it was in (the first named function in the stack), so IT can find it
+const errSpot = err => { const m = String(err && err.stack || '').split('\n').map(l => (l.match(/at (?:async )?([A-Za-z_$][\w$.]*) \(/) || l.match(/^([A-Za-z_$][\w$.]*)@/) || [])[1]).filter(x => x && !/^(HTMLElement|Object|Array|Promise|eval)\b/.test(x)); return m.length ? ' · in ' + m.slice(0, 2).join(' < ') : ''; };
+addEventListener('error', e => { if (e && e.message && !/ResizeObserver|Script error/.test(e.message)) reportError('page', e.message + errSpot(e.error) + (e.lineno ? ` (line ${e.lineno})` : '')); });
+addEventListener('unhandledrejection', e => { const r = e && e.reason; reportError('page', r && r.message ? r.message + errSpot(r) : r); });
 async function syncCall(body, cfg = syncCfg()) {
   if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(cfg.url || '')) throw new Error("Couldn't connect right now. Try again in a minute.");
   let r;
@@ -4543,6 +4545,7 @@ async function openIT(tab, quick) {   // quick: show what we have right away (IT
 function itShow() {
   const el = $('#it_body'); if (!el) return;
   if (IT.health?.old && !['maint'].includes(IT.tab)) { el.innerHTML = `<p style="color:var(--peach)">These tools need the team script v14 (it's v${esc(IT.health.version)}). Maintenance still works.</p>`; return; }
+  el.dataset.tab = IT.tab;   // a tab still loading when you switch away won't draw over the new one
   ({ status: itStatusTab, mentors: itMentorsTab, problems: itProblemsTab, check: itCheckTab, names: itNamesTab, compare: itCompareTab, accounts: itAccountsTab, security: itSecurityTab, maint: () => itMaintenance(IT.health) })[IT.tab]?.(el);
 }
 const itCard = (state, label, value, note = '') => `<div class="it-card ${state}"><div class="lbl">${label}</div><b>${value}</b>${note ? `<div class="muted sm">${note}</div>` : ''}</div>`;
@@ -4583,6 +4586,7 @@ function itMentorsTab(el) {
 async function itProblemsTab(el) {
   el.innerHTML = '<p class="muted">Loading...</p>';
   let r; try { r = await itCall({ action: 'it-errors' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab && el.dataset.tab !== 'problems') return;
   el.innerHTML = `<div class="row" style="gap:8px;margin-bottom:8px"><span class="muted sm">Problems calendars reported (newest first). The same problem from the same person is logged at most every 10 minutes.</span><span style="flex:1"></span>${r.errors.length ? '<button class="btn sm" id="it_errclr">Clear the list</button>' : ''}</div>
     ${r.errors.length ? `<table class="team-tbl"><thead><tr><th>When</th><th>Who</th><th>Where</th><th>Problem</th><th>Device</th></tr></thead><tbody>${r.errors.map(x => `<tr><td class="sm">${esc(x.when)}</td><td>${esc(x.who)}</td><td>${esc(x.where)}</td><td class="sm">${esc(x.message)}</td><td class="sm muted">${esc(x.device)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing reported. 🎉</p>'}`;
   if ($('#it_errclr')) $('#it_errclr').onclick = async () => { if (!confirm('Clear the problem list?')) return; await itCall({ action: 'it-errors-clear' }); itProblemsTab(el); };
@@ -4591,6 +4595,7 @@ async function itProblemsTab(el) {
 async function itCheckTab(el) {
   el.innerHTML = '<p class="muted">Looking over the team Sheet...</p>';
   let d; try { d = (await itCall({ action: 'it-export' })).data; } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab && el.dataset.tab !== 'check') return;
   const lc = x => String(x || '').trim().toLowerCase(), today = ymd(new Date());
   const helps = {}; (d.tabs.Planners || []).forEach(r => { try { const p = JSON.parse(r[2] || '{}'); if (p.uses) helps[lc(r[0])] = lc(p.uses); } catch { /* not that row */ } });
   const studentsBy = {}; (d.tabs.Students || []).forEach(r => { (studentsBy[lc(r[0])] ||= new Set()).add(lc(r[2])); });
@@ -4676,6 +4681,7 @@ async function itCompareTab(el) {
 async function itAccountsTab(el) {
   el.innerHTML = '<p class="muted">Loading...</p>';
   let r; try { r = await itCall({ action: 'it-devices' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab && el.dataset.tab !== 'accounts') return;
   const names = [...new Set((IT.health.users || []).map(u => u.name))].sort();
   el.innerHTML = `<h4 style="margin-top:0">Signed-in devices</h4>
     ${r.devices.length ? `<table class="team-tbl"><thead><tr><th>Mentor</th><th>Device</th><th>Signed in</th><th>Last used</th><th></th></tr></thead><tbody>${r.devices.map(d => `<tr data-dv="${esc(d.name)}|${esc(d.dev)}"><td><b>${esc(d.name)}</b></td><td>${esc(d.device)}</td><td class="sm">${esc(itAgo(d.at))}</td><td class="sm">${esc(itAgo(d.last))}</td><td><button class="btn sm" data-dvout>Sign out</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">No one is signed in.</p>'}
@@ -4689,6 +4695,7 @@ async function itAccountsTab(el) {
 async function itSecurityTab(el) {
   el.innerHTML = '<p class="muted">Loading...</p>';
   let r; try { r = await itCall({ action: 'it-security' }); } catch (e) { el.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`; return; }
+  if (el.dataset.tab && el.dataset.tab !== 'security') return;
   const gen = () => { const w = ['river', 'maple', 'cedar', 'lumen', 'harbor', 'willow', 'aspen', 'comet', 'ember', 'quartz', 'falcon', 'meadow']; const p = () => w[crypto.getRandomValues(new Uint32Array(1))[0] % w.length]; return `${p()}-${p()}-${100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000}`; };
   el.innerHTML = `${r.locked ? '<p style="color:var(--red)"><b>Code sign-ins are paused right now</b> (20 wrong codes in 15 minutes).</p>' : ''}
     <h4 style="margin-top:0">Change a code</h4>
@@ -4849,7 +4856,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120120024';
+const BUILD_ID = '20261120120521';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
