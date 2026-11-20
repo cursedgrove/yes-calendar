@@ -3749,7 +3749,12 @@ async function syncNow(quiet = true) {
         await api('POST', 'team-import', { from: m.name, students: m.students,
           calls: (m.calls || []).map(x => ({ name: x.student, at: `${x.date}T${/^\d{2}:\d{2}$/.test(x.time) ? x.time : '12:00'}`, outcome: /^came/i.test(x.result) ? 'reached' : 'no-show' })) });
       }
-      if (!window.YES_ADMIN?.test && !window.YES_ADMIN?.baseline) for (const src of new Set(Mall().students.filter(s => s.src && !names.has(s.src)).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
+      // a mentor taken off the Sheet (IT removed them): drop the copy here too. The admin page keeps planner data
+      // for mentors who haven't signed in yet, so those stay.
+      if (!window.YES_ADMIN?.test && (!window.YES_ADMIN?.baseline || SY.planners)) {
+        const keep = new Set([...names, ...(window.YES_ADMIN?.baseline ? (SY.planners || []).filter(p => !p.uses && (p.roster || []).length).map(p => p.name) : [])].map(x => String(x).toLowerCase()));
+        for (const src of new Set(Mall().students.filter(s => s.src && !keep.has(s.src.toLowerCase())).map(s => s.src))) { await api('POST', 'team-clear', { from: src }); SY.seen.delete(src); changed = true; }
+      }
       if (window.YES_ADMIN?.baseline) changed = (await loadPlanners(names)) || changed;
       if (meA && (hadMe || Mall().students.some(s => !s.src && String(s.mentor || '').toLowerCase() === meA))) {   // only when the admin has their own students (here or on another computer)
         // team copies of the admin's own students (loaded before the name was set, or on another device): make them this device's own
@@ -4698,7 +4703,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120110126';
+const BUILD_ID = '20261120111224';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
