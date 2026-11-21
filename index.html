@@ -3370,15 +3370,18 @@ function attSplitName(raw) {   // -> { first, lasts:[...] }
   if (t.includes(',')) { const [l, f] = t.split(',', 2); const ft = attNorm(f).split(' ').filter(Boolean), lt = attNorm(l).split(' ').filter(Boolean); return { first: ft[0] || '', lasts: lt }; }
   const tk = attNorm(t).split(' ').filter(Boolean); return { first: tk[0] || '', lasts: tk.slice(1) };
 }
-const ABS_CODE = /^(a|ab|abs|absent|u|ua|una|unx|unv|unexc|unexcused|e|ex|exc|excused|i|ill|sick|x|tru|truant|sus|oss|iss|ue|ae|ad|ap|ia|nr)$/i;
-const NOT_ABS = /tardy|^t$|^tu$|^te$|present|^p$|late|^l$|on.?time/i;
+// Modesto City Schools' PowerSchool codes (Attendance → Absentee Report). Absent from school: A, X, I, D, J, H, G, MA, CR, D0, D2-D4.
+// At school (left out): tardies T/W/M, U picked up early, L left class early, Z PE non-dress, O on-campus, F school activity,
+// P positive, E proof of immunization, R attending MJC, K closure, SE/SU Saturday makeup, N/Y/CN/CY IS work, DP/D1 DL present/tardy, V, Q.
+const ABS_CODE = /^(a|x|i|d|j|h|g|ma|cr|d0|d2|d3|d4|ab|abs|absent|unexcused|illness|doctor|ill|sick)$/i;
+const NOT_ABS = /^(t|w|m|u|l|z|o|f|p|e|r|k|se|su|n|y|cn|cy|dp|d1|v|q)$|tardy|present|late|on.?time|left class|picked up|non dress|on-campus|school activity|positive|immunization|attending mjc|closure|makeup/i;
 // the pasted text / file rows -> [{ name, code }]
 function attParse(rows) {
   rows = rows.map(r => r.map(c => String(c || '').trim())).filter(r => r.some(Boolean));
   if (!rows.length) return [];
   const H = rows.slice(0, 15).findIndex(r => r.some(c => /^(student|students|name|student name|lastfirst|last ?first|last name|first name|last_name|first_name|student_name)$/i.test(c.replace(/[_.]/g, ' ').trim())));
   if (H < 0) {   // no header: each line is a name (maybe followed by a code)
-    return rows.map(r => { const cells = r.filter(Boolean); const nm = cells.find(c => /[a-z]{2}/i.test(c) && !ABS_CODE.test(c) && !NOT_ABS.test(c)) || ''; const code = cells.find(c => c !== nm && (ABS_CODE.test(c) || NOT_ABS.test(c))) || ''; return { name: nm, code }; }).filter(x => x.name);
+    return rows.map(r => { const cells = r.filter(Boolean); const nm = cells.find(c => /[a-z]{2}/i.test(c) && !ABS_CODE.test(c) && !NOT_ABS.test(c)) || ''; const rest = cells.filter(c => c !== nm); const code = rest.find(c => ABS_CODE.test(c)) || rest.find(c => NOT_ABS.test(c)) || ''; return { name: nm, code }; }).filter(x => x.name);   // absent in any period wins over a tardy
   }
   const h = rows[H].map(c => c.toLowerCase().replace(/[_.]/g, ' ').trim());
   const col = re => h.findIndex(c => re.test(c));
@@ -3421,7 +3424,14 @@ function attTextRows(t) {
   if (!lines.length) return [];
   const tabs = lines.some(l => l.includes('\t'));
   const csv = !tabs && lines.slice(0, 5).every(l => (l.match(/,/g) || []).length >= 2);   // a CSV export (a "Last, First" name alone has one comma)
-  return lines.map(l => tabs ? l.split('\t') : csv ? parseCSVLine(l) : [l]);
+  return lines.map(l => tabs ? l.split('\t') : csv ? parseCSVLine(l) : attPlain(l));
+}
+// a line of plain text (e.g. copied out of the Absentee Report PDF): "Garcia, Maria L  123456  10  A  A"
+// the name is everything before the student number / grade; after it come the period codes. Wide gaps also split.
+function attPlain(l) {
+  const parts = l.trim().split(/\s{2,}/); if (parts.length > 1) return parts.flatMap((p, i) => i ? p.split(/\s+/) : [p]);
+  const t = l.trim().split(/\s+/), d = t.findIndex((w, i) => i > 0 && /^\d+$/.test(w));
+  return d > 0 ? [t.slice(0, d).join(' '), ...t.slice(d)] : [l.trim()];
 }
 async function openAttendance() {
   ATT.date = ATT.date || ymd(new Date());
@@ -3430,8 +3440,8 @@ async function openAttendance() {
       <p class="muted sm" style="margin-top:0">Paste the day's absence list (copy the table from PowerSchool) or upload its export (.csv or .xlsx). IYT students on it get <b>Absent today</b> on their mentor's calendar and move to the next school day. Only names are used, and only IYT students are kept.</p>
       <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><label class="field" style="margin:0"><span>Day</span><input type="date" id="att_d" value="${ATT.date}"></label>
         <label class="btn">Upload a file<input type="file" id="att_f" accept=".csv,.txt,.xlsx,.tsv" hidden></label><span id="att_fn" class="muted sm"></span><span style="flex:1"></span><span id="att_now" class="muted sm"></span></div>
-      <textarea id="att_t" rows="6" style="width:100%;margin-top:8px;font-family:inherit" placeholder="Paste here. Ex:\nLast, First Middle&#9;Code\nGarcia, Maria L&#9;A"></textarea>
-      <div class="row" style="gap:8px;margin-top:6px"><button class="btn primary" id="att_chk">Check names</button><span class="muted sm">Rows marked tardy or present are left out.</span></div>
+      <textarea id="att_t" rows="6" style="width:100%;margin-top:8px;font-family:inherit" placeholder="Paste here: the Absentee Report from PowerSchool (Attendance → Absentee Report), or any list with names. Ex:\nGarcia, Maria L&#9;A"></textarea>
+      <div class="row" style="gap:8px;margin-top:6px"><button class="btn primary" id="att_chk">Check names</button><span class="muted sm">Rows with tardy / at-school codes (T, W, M, U, L, Z, O, F, P, E, R...) are left out.</span></div>
       <div id="att_out"></div>
     </div>`, 'lg');
   $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
@@ -4075,7 +4085,7 @@ function deviceName() {
   return o ? `${b} on ${o}` : b;
 }
 // a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
-const YES_BUILD = '202611211913';   // filled in when the pages are built
+const YES_BUILD = '202611211916';   // filled in when the pages are built
 const ERR_SENT = new Map();
 function reportError(where, err) {
   try {
@@ -5504,7 +5514,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261121111330';
+const BUILD_ID = '20261121111645';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
