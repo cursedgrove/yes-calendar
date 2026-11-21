@@ -3916,6 +3916,17 @@ const syncOn = () => { const c = syncCfg(); return !!(c.url && c.on !== false &&
 
 // "Chrome on Windows", "Safari on iPhone"...: shown to IT next to signed-in devices and problem reports
 // a random id for this browser, so IT can tell the admin's computers apart (and sign one out)
+/* How often a background tab checks in. On screen: every tick. Hidden for a while, or at night / on weekends: less often,
+   so a dozen calendars left open all day and night stay well inside Google's daily limits for the team script. */
+let HIDDEN_SINCE = document.hidden ? Date.now() : 0;
+document.addEventListener('visibilitychange', () => { HIDDEN_SINCE = document.hidden ? Date.now() : 0; });
+function bgPace(base) {   // how many ms between runs right now, for a job that normally runs every `base` ms
+  if (!document.hidden) return base;
+  const d = new Date(), h = d.getHours(), off = d.getDay() === 0 || d.getDay() === 6 || h < 6 || h >= 20;
+  if (off) return Math.max(base, 120000);                       // nights and weekends: every 2 minutes
+  return Date.now() - HIDDEN_SINCE > 15 * 60000 ? Math.max(base, base * 3) : base;   // hidden 15+ minutes: a third as often
+}
+function bgPaced(base, fn) { let last = 0; return () => { const now = Date.now(); if (now - last < bgPace(base) - 500) return; last = now; return fn(); }; }
 /* A timer that keeps its pace in a background tab. Browsers slow normal timers down a lot in hidden tabs
    (Chrome: to once a minute after 5 minutes); a tiny worker's timer isn't slowed, so the calendar stays live. */
 let BG_WORKER = null; const BG_JOBS = new Map();
@@ -3941,7 +3952,7 @@ function deviceName() {
   return o ? `${b} on ${o}` : b;
 }
 // a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
-const YES_BUILD = '202611210011';   // filled in when the pages are built
+const YES_BUILD = '202611210619';   // filled in when the pages are built
 const ERR_SENT = new Map();
 function reportError(where, err) {
   try {
@@ -4103,8 +4114,14 @@ async function mentorSync(c) {
     pl.merge = true;
     pl.delStudents = base && !wiped ? [...bS].filter(k => !nowS.has(k) && rS.has(k)) : [];
     pl.delCalls = base && !wiped ? [...bC].filter(k => !nowC.has(k) && rC.has(k)) : [];
-    if (pl.students.length || pl.calls.length || pl.delStudents.length || pl.delCalls.length) await syncCall(pl, c);
-    store.set(baseKey, JSON.stringify({ s: Object.fromEntries(pl.students.map(x => [x.name.trim().toLowerCase(), sSig(x)])), c: Object.fromEntries(pl.calls.map(x => [ckey(x.student, x.date, x.time), RESULT(x.result)])) }));
+    // only send when the Sheet doesn't already have exactly this (a dozen calendars re-sending unchanged lists every minute
+    // would keep the team script busy and rewrite the Sheet for nothing)
+    const newBase = { s: Object.fromEntries(pl.students.map(x => [x.name.trim().toLowerCase(), sSig(x)])), c: Object.fromEntries(pl.calls.map(x => [ckey(x.student, x.date, x.time), RESULT(x.result)])) };
+    const sheetHas = { s: Object.fromEntries([...rS].map(([k, x]) => [k, sSig(x)])), c: Object.fromEntries([...rC].map(([k, x]) => [k, RESULT(x.result)])) };
+    const canon = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+    const same = canon(newBase.s) === canon(sheetHas.s) && canon(newBase.c) === canon(sheetHas.c) && !pl.delStudents.length && !pl.delCalls.length;
+    if (!same && (pl.students.length || pl.calls.length || pl.delStudents.length || pl.delCalls.length)) await syncCall(pl, c);
+    store.set(baseKey, JSON.stringify(newBase));
     if (changed && $('#modalWrap').hidden) render();
   } else {
     // older script on the Sheet: send everything like before (but never an empty list over real data)
@@ -4365,10 +4382,10 @@ function syncInit() {
     return r;
   };
   setTimeout(() => syncNow(), 1500);
-  bgEvery(60000, () => syncNow());                                                   // boss: every minute; mentor: a safety resend (background tabs too)
+  bgEvery(10000, bgPaced(60000, () => syncNow()));                                   // boss: every minute; mentor: a safety resend (slower in a long-hidden tab)
   let watching = false;
   const watchLoop = async () => { if (watching) return; watching = true; try { await plannerWatch(); await adminWatch(); } finally { watching = false; } };
-  bgEvery(10000, watchLoop);   // every 10 s, even when this tab is in the background
+  bgEvery(10000, bgPaced(10000, watchLoop));   // every 10 s on screen and for a while in the background (see bgPace)
   setTimeout(watchLoop, 4000);
   addEventListener('online', () => watchLoop());   // back online: catch up right away
   addEventListener('visibilitychange', () => { if (!document.hidden) plannerWatch(); });
@@ -5364,7 +5381,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120161112';
+const BUILD_ID = '20261120221931';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
