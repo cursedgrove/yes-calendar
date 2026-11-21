@@ -2059,6 +2059,16 @@ function goalsFor(ws) {
   return { ...st, dailyGoal: closedOn(new Date()) ? 0 : +st.dailyGoal, weeklyGoal: Math.round(+st.weeklyGoal * Math.min(open, 5) / 5), openDays: open };
 }
 function nextDue(s) {
+  const d = nextDueRaw(s);
+  // absent that day (marked by hand, or from the PowerSchool attendance import) and they haven't come in since:
+  // due the next school day instead
+  if (d && s.absentOn && ymd(d) <= s.absentOn) {
+    const lc = lastCall(s.id, c => c.outcome === 'reached');
+    if (!lc || lc.at.slice(0, 10) <= s.absentOn) { let n = addDays(parseD(s.absentOn), 1); for (let i = 0; i < 60 && !openDay(n); i++) n = addDays(n, 1); return n; }
+  }
+  return d;
+}
+function nextDueRaw(s) {
   const lc = lastCall(s.id, c => c.outcome === 'reached');
   // rescheduled by hand (they missed and someone else came instead): that date, until they come in again
   if (s.nextAt && (!lc || lc.at < (s.nextSet || s.nextAt))) {
@@ -2211,7 +2221,7 @@ function renderMentor() {
       ${IS_ADMIN && schoolSites().length > 1 ? `<select id="mschool" title="Which school"><option value="">${schoolSites().length > 2 ? 'All schools' : 'Both schools'}</option>${schoolSites().map(x => `<option value="${esc(x)}" ${S.mschool === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
       ${IS_ADMIN ? `<select id="mmentor"><option value="">All mentors</option>${can('own') ? `<option value="__me__" ${ownView() ? 'selected' : ''}>${meLabel()}</option>` : ''}${mentors.filter(m => !sameName(m, adminName())).map(m => `<option value="${esc(m)}" ${S.mmentor === m ? 'selected' : ''}>${esc(mentorLabel(m))}</option>`).join('')}</select>` : ''}
       <span class="spacer"></span>
-      ${TEAMV() ? (can('send') ? '<button class="btn primary" data-mact="send">Send to team</button>' : '') + '<button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button>' + (can('logins') ? '<button class="btn" data-mact="logins">Logins</button>' : '') + (isDirector() ? '<button class="btn" data-mact="overview" title="Progress for every school, and what the admins have been doing">Overview</button>' : '') + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
+      ${TEAMV() ? (can('send') ? '<button class="btn primary" data-mact="send">Send to team</button>' : '') + '<button class="btn" data-mact="coverage" title="Every student, week by week">Coverage</button><button class="btn" data-mact="report" title="A printable report for each mentor">Print report</button>' + (can('sessions') ? '<button class="btn" data-mact="attendance" title="Mark IYT students absent from a PowerSchool attendance list">Attendance</button>' : '') + (can('logins') ? '<button class="btn" data-mact="logins">Logins</button>' : '') + (isDirector() ? '<button class="btn" data-mact="overview" title="Progress for every school, and what the admins have been doing">Overview</button>' : '') + (window.YES_ADMIN?.it && !itAsAdmin() ? '<button class="btn" data-mact="ittools">IT tools</button>' : '') : `<button class="btn primary" data-mact="add">Add student</button>
       <button class="btn" data-mact="planner">Import planner</button>
       <button class="btn" data-mact="import">Paste roster</button>`}
       <button class="btn" data-mact="roster">Roster (${M().students.length})</button>
@@ -2257,6 +2267,7 @@ function renderMentor() {
     if (a === 'send') return openSend();
     if (a === 'logins') return can('logins') ? openLogins() : toast("You don't have access to logins. Ask IT.");
     if (a === 'coverage') return openCoverage();
+    if (a === 'attendance') return openAttendance();
     if (a === 'overview') return dirPage() ? setView('director') : openOverview();
     if (a === 'report') return openReport();
     if (a === 'ittools') return openIT(undefined, true);
@@ -3350,6 +3361,118 @@ renderMentor = inFrame(renderMentor);
 openCoverage = inFrame(openCoverage);
 if (typeof openReport === 'function') openReport = inFrame(openReport);
 
+/* ---------- attendance from PowerSchool: paste or upload the day's absence list, IYT students get "Absent today" ----------
+   Matched by name ("Last, First Middle" or "First Last"). Saved in the team script, so every mentor's calendar shows it. */
+const ATT = { date: '', rows: [], picks: null };
+const attNorm = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z\s,'-]/g, ' ').replace(/['-]/g, ' ').replace(/\s+/g, ' ').trim();
+function attSplitName(raw) {   // -> { first, lasts:[...] }
+  const t = String(raw || '').trim();
+  if (t.includes(',')) { const [l, f] = t.split(',', 2); const ft = attNorm(f).split(' ').filter(Boolean), lt = attNorm(l).split(' ').filter(Boolean); return { first: ft[0] || '', lasts: lt }; }
+  const tk = attNorm(t).split(' ').filter(Boolean); return { first: tk[0] || '', lasts: tk.slice(1) };
+}
+const ABS_CODE = /^(a|ab|abs|absent|u|ua|una|unx|unv|unexc|unexcused|e|ex|exc|excused|i|ill|sick|x|tru|truant|sus|oss|iss|ue|ae|ad|ap|ia|nr)$/i;
+const NOT_ABS = /tardy|^t$|^tu$|^te$|present|^p$|late|^l$|on.?time/i;
+// the pasted text / file rows -> [{ name, code }]
+function attParse(rows) {
+  rows = rows.map(r => r.map(c => String(c || '').trim())).filter(r => r.some(Boolean));
+  if (!rows.length) return [];
+  const H = rows.slice(0, 15).findIndex(r => r.some(c => /^(student|students|name|student name|lastfirst|last ?first|last name|first name|last_name|first_name|student_name)$/i.test(c.replace(/[_.]/g, ' ').trim())));
+  if (H < 0) {   // no header: each line is a name (maybe followed by a code)
+    return rows.map(r => { const cells = r.filter(Boolean); const nm = cells.find(c => /[a-z]{2}/i.test(c) && !ABS_CODE.test(c) && !NOT_ABS.test(c)) || ''; const code = cells.find(c => c !== nm && (ABS_CODE.test(c) || NOT_ABS.test(c))) || ''; return { name: nm, code }; }).filter(x => x.name);
+  }
+  const h = rows[H].map(c => c.toLowerCase().replace(/[_.]/g, ' ').trim());
+  const col = re => h.findIndex(c => re.test(c));
+  const cFull = col(/^(student|students|name|student name|lastfirst|last ?first|student name \(last, first\))$/), cLast = col(/^last( name)?$/), cFirst = col(/^first( name)?$/);
+  const cDate = col(/date/), colNot = (re, skip) => h.findIndex((c, i) => i !== skip && re.test(c));
+  let cCode = colNot(/code/, cDate); if (cCode < 0) cCode = colNot(/status|attendance|^att\b|reason|type|presence/, cDate);   // "Att_Date" is the date, not the code
+  return rows.slice(H + 1).map(r => ({
+    name: cFull >= 0 && r[cFull] ? r[cFull] : (cLast >= 0 ? `${r[cLast] || ''}, ${r[cFirst] || ''}` : ''),
+    code: cCode >= 0 ? r[cCode] || '' : '', date: cDate >= 0 ? r[cDate] || '' : ''
+  })).filter(x => x.name.replace(/[,\s]/g, ''));
+}
+function attDateOk(d, want) {   // a date column, if there is one, has to be the chosen day
+  if (!d) return true; const t = String(d).trim();
+  const iso = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/), us = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  const v = iso ? `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}` : us ? `${us[3].length === 2 ? '20' + us[3] : us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}` : '';
+  return !v || v === want;
+}
+// match against every IYT student this page has: { hits:[{s, row}], unsure:[{row, opts}], skipped }
+function attMatch(list) {
+  const studs = Mall().students.filter(s => s.active !== false), idx = studs.map(s => ({ s, ...attSplitName(s.name), all: attNorm(s.name).split(' ') }));
+  const hits = [], unsure = []; let skipped = 0; const used = new Set();
+  for (const row of list) {
+    const n = attSplitName(row.name); if (!n.first || !n.lasts.length) { skipped++; continue; }
+    // same first name, and their last name is among the row's last-name words (or the other way round): middle names don't matter
+    let opts = idx.filter(x => x.first === n.first && x.lasts.length && (n.lasts.includes(x.lasts[x.lasts.length - 1]) || x.lasts.some(l => n.lasts.includes(l))));
+    if (!opts.length) opts = idx.filter(x => (x.first.startsWith(n.first) || n.first.startsWith(x.first)) && Math.min(x.first.length, n.first.length) >= 3 && x.lasts.length && n.lasts.includes(x.lasts[x.lasts.length - 1]));   // Alex / Alexander
+    if (!opts.length) { skipped++; continue; }
+    if (opts.length === 1 && opts[0].first === n.first) { if (!used.has(opts[0].s.id)) { used.add(opts[0].s.id); hits.push({ s: opts[0].s, row }); } }
+    else unsure.push({ row, opts: opts.map(o => o.s) });
+  }
+  return { hits, unsure, skipped };
+}
+async function attFileRows(file) {
+  if (/\.xlsx$/i.test(file.name)) { const sheets = await readXlsxSheets(await file.arrayBuffer()); return sheets.length ? sheetRows(sheets[0]) : []; }
+  if (/\.xls$/i.test(file.name)) throw new Error('Save it as .xlsx or .csv first (old .xls files can\'t be read here).');
+  return attTextRows(await file.text());
+}
+function attTextRows(t) {
+  const lines = String(t || '').replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const tabs = lines.some(l => l.includes('\t'));
+  const csv = !tabs && lines.slice(0, 5).every(l => (l.match(/,/g) || []).length >= 2);   // a CSV export (a "Last, First" name alone has one comma)
+  return lines.map(l => tabs ? l.split('\t') : csv ? parseCSVLine(l) : [l]);
+}
+async function openAttendance() {
+  ATT.date = ATT.date || ymd(new Date());
+  openModal(`<div class="m-head"><h2>Attendance from PowerSchool</h2><button class="iconbtn" data-x>✕</button></div>
+    <div class="m-body">
+      <p class="muted sm" style="margin-top:0">Paste the day's absence list (copy the table from PowerSchool) or upload its export (.csv or .xlsx). IYT students on it get <b>Absent today</b> on their mentor's calendar and move to the next school day. Only names are used, and only IYT students are kept.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><label class="field" style="margin:0"><span>Day</span><input type="date" id="att_d" value="${ATT.date}"></label>
+        <label class="btn">Upload a file<input type="file" id="att_f" accept=".csv,.txt,.xlsx,.tsv" hidden></label><span id="att_fn" class="muted sm"></span><span style="flex:1"></span><span id="att_now" class="muted sm"></span></div>
+      <textarea id="att_t" rows="6" style="width:100%;margin-top:8px;font-family:inherit" placeholder="Paste here. Ex:\nLast, First Middle&#9;Code\nGarcia, Maria L&#9;A"></textarea>
+      <div class="row" style="gap:8px;margin-top:6px"><button class="btn primary" id="att_chk">Check names</button><span class="muted sm">Rows marked tardy or present are left out.</span></div>
+      <div id="att_out"></div>
+    </div>`, 'lg');
+  $$('#modal [data-x]').forEach(b => { b.onclick = () => closeModal(); });
+  const showNow = async () => { const el = $('#att_now'); if (!el) return; try { const j = await syncCall({ action: 'attendance-get', date: $('#att_d').value }); if (!$('#att_now')) return; el.innerHTML = j.list.length ? `${j.list.length} already marked absent this day · <button class="linkbtn sm" id="att_clr">clear the day</button>` : 'None marked absent this day yet'; const c = $('#att_clr'); if (c) c.onclick = () => attSave([], 'Cleared.'); } catch (e) { el.textContent = ''; } };
+  if (syncOn()) showNow();
+  $('#att_d').onchange = () => { ATT.date = $('#att_d').value; if (syncOn()) showNow(); if (ATT.rows.length) attCheck(); };
+  $('#att_f').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { ATT.rows = await attFileRows(f); $('#att_fn').textContent = f.name; $('#att_t').value = ''; attCheck(); } catch (err) { toast(err.message); } };
+  $('#att_chk').onclick = () => { ATT.rows = attTextRows($('#att_t').value); attCheck(); };
+}
+function attCheck() {
+  const out = $('#att_out'); if (!out) return;
+  const day = $('#att_d').value, parsed = attParse(ATT.rows), inDay = parsed.filter(x => attDateOk(x.date, day));
+  const kept = inDay.filter(x => !x.code || !NOT_ABS.test(x.code)), dropped = inDay.length - kept.length;
+  const m = attMatch(kept);
+  ATT.picks = m;
+  if (!parsed.length) { out.innerHTML = '<p style="color:var(--red)">No names found. Paste the rows (with a name column), or upload the export.</p>'; return; }
+  const by = {}; m.hits.forEach(h => { (by[h.s.mentor] = by[h.s.mentor] || []).push(h); });
+  out.innerHTML = `<h4 style="margin:12px 0 4px">${m.hits.length} IYT student${m.hits.length === 1 ? '' : 's'} absent ${day === ymd(new Date()) ? 'today' : 'on ' + esc(fmtDateShort(parseD(day)))}</h4>
+    <div class="muted sm">${parsed.length} row${parsed.length === 1 ? '' : 's'} read · ${m.skipped} aren't IYT students (left out)${dropped ? ` · ${dropped} tardy/present (left out)` : ''}${parsed.length - inDay.length ? ` · ${parsed.length - inDay.length} for another day (left out)` : ''}</div>
+    ${m.hits.length ? `<table class="team-tbl" style="margin-top:6px"><thead><tr><th></th><th>Student</th><th>Mentor</th><th>From the list</th></tr></thead><tbody>
+      ${Object.keys(by).sort().map(mn => by[mn].map(h => `<tr><td><input type="checkbox" data-atth="${h.s.id}" checked></td><td>${esc(h.s.name)}</td><td>${esc(mentorLabel(mn))}</td><td class="muted sm">${esc(h.row.name)}${h.row.code ? ' · ' + esc(h.row.code) : ''}</td></tr>`).join('')).join('')}</tbody></table>` : ''}
+    ${m.unsure.length ? `<h4 style="margin:12px 0 4px">Not sure (${m.unsure.length}): pick the right student or leave it</h4>${m.unsure.map((u, i) => `<div class="row" style="gap:8px;margin:3px 0"><span class="muted sm" style="min-width:180px">${esc(u.row.name)}${u.row.code ? ' · ' + esc(u.row.code) : ''}</span><select data-attu="${i}"><option value="">leave out</option>${u.opts.map(o => `<option value="${o.id}">${esc(o.name)} (${esc(mentorLabel(o.mentor))})</option>`).join('')}</select></div>`).join('')}` : ''}
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary" id="att_go" ${m.hits.length || m.unsure.length ? '' : 'disabled'}>Mark absent</button><span class="muted sm">This replaces the day's list${myScope() ? ' for your schools' : ''}. Mentors see it within about a minute.</span></div>`;
+  $('#att_go').onclick = () => {
+    const ids = new Set([...$$('#att_out [data-atth]:checked').map(x => x.dataset.atth), ...$$('#att_out [data-attu]').map(x => x.value).filter(Boolean)]);
+    const list = Mall().students.filter(s => ids.has(String(s.id))).map(s => [s.src || s.mentor || adminName(), s.name]);
+    if (!list.length) return toast('Nothing ticked');
+    attSave(list, `Marked ${list.length} absent.`);
+  };
+}
+async function attSave(list, msg) {
+  const day = $('#att_d') ? $('#att_d').value : ATT.date;
+  if (!syncOn()) return toast('This copy isn\'t connected to the team script.');
+  try {
+    const j = await syncCall({ action: 'attendance-set', date: day, list });
+    if (j.error) throw new Error(j.error);
+    toast(msg + (list.length ? ' Mentors see it within about a minute.' : ''), { duration: 6000 });
+    closeModal(); if (typeof syncNow === 'function') syncNow(true);
+  } catch (e) { toast(e.message); }
+}
+
 /* ======================================================================== import a mentor planner (PDF or Excel) */
 // Reads the CD Mentor Planner layout: a roster table (First / Last / ID # / Period / Subject / Room / Teacher ...)
 // and a month calendar where each pulled-out student sits in a green (came in) or red (didn't) cell.
@@ -3952,7 +4075,7 @@ function deviceName() {
   return o ? `${b} on ${o}` : b;
 }
 // a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
-const YES_BUILD = '202611210619';   // filled in when the pages are built
+const YES_BUILD = '202611211913';   // filled in when the pages are built
 const ERR_SENT = new Map();
 function reportError(where, err) {
   try {
@@ -5381,7 +5504,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261120221931';
+const BUILD_ID = '20261121111330';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
