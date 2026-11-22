@@ -4103,7 +4103,7 @@ function deviceName() {
   return o ? `${b} on ${o}` : b;
 }
 // a problem on this calendar goes to the IT error log (the same problem at most every 10 minutes from here)
-const YES_BUILD = '202611211916';   // filled in when the pages are built
+const YES_BUILD = '202611222116';   // filled in when the pages are built
 const ERR_SENT = new Map();
 function reportError(where, err) {
   try {
@@ -4139,7 +4139,7 @@ async function syncCall(body, cfg = syncCfg()) {
   if (noKey && typeof kickedOut === 'function') kickedOut(!j.signedOut);
   const bossOut = cfg.role === 'boss' && j.signedOut;   // IT signed this admin computer out
   if (bossOut && typeof adminKicked === 'function') adminKicked();
-  if (j.error) throw new Error(noKey ? 'You were signed out. Sign in again with your passcode.' : bossOut ? 'IT signed this computer out. Sign in again with the admin code.' : j.error);
+  if (j.error) throw new Error(noKey ? 'You were signed out. Sign in again with your password.' : bossOut ? 'IT signed this computer out. Sign in again with the admin code.' : j.error);
   return j;
 }
 function syncStatus() {
@@ -4557,7 +4557,7 @@ function openSync() {
   openModal(`<div class="m-head"><h2>Sharing with your admin</h2><button class="iconbtn" data-x>✕</button></div>
   <div class="m-body">
     <p class="muted sm" style="margin:0">${boss ? 'Everyone\'s students and pull-outs come in every minute.' : 'Your students and pull-outs are shared with your admin a few seconds after each change.'}</p>
-    <div class="muted sm">${syncOn() ? (SY.err ? `<span style="color:var(--red)">${esc(SY.err)}</span>` : SY.last ? 'Last synced ' + fmtTime(SY.last) : 'Connected') : L.offline ? 'Working offline. Sign out and sign back in with your passcode to share.' : 'Not connected.'}</div>
+    <div class="muted sm">${syncOn() ? (SY.err ? `<span style="color:var(--red)">${esc(SY.err)}</span>` : SY.last ? 'Last synced ' + fmtTime(SY.last) : 'Connected') : L.offline ? 'Working offline. Sign out and sign back in with your password to share.' : 'Not connected.'}</div>
     ${boss ? '' : `<label class="row"><input type="checkbox" id="sy_noids" ${c.noIds === false ? '' : 'checked'}> Don't send student ID numbers</label>`}
     <label class="row"><input type="checkbox" id="sy_on" ${c.on === false ? '' : 'checked'}> ${boss ? 'Keep updating' : 'Share with my admin'}</label>
   </div>
@@ -4755,7 +4755,7 @@ function loginNeeded() {
 function loginGate() {
   renderItAs(); if (typeof applyScope === 'function') applyScope();
   const c = syncCfg(), old = loginMode() === 'mentor' && c.code && !c.token;   // still set up with the old shared team code
-  if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(async () => { await checkOwner(); offerPlanner(); }, 600);
+  if (loginNeeded()) showLogin(old ? 'Sign-in changed: each mentor now has their own passcode. Ask your admin for yours.' : ''); else setTimeout(async () => { await checkOwner(); offerPlanner(); pwCheck(); }, 600);
   renderWho();
 }
 
@@ -4764,7 +4764,7 @@ function showLogin(msg) {
   const known = [...new Set([...(Mall().students || []).map(s => s.mentor).filter(Boolean), ...(L.name ? [L.name] : [])])].sort();
   const title = { director: 'Director sign in', mentor: 'Mentor sign in', admin: 'Admin sign in', admintest: 'Admin sign in (test)', test: 'Test sign in', it: 'IT sign in' }[mode];
   const sub = {
-    mentor: 'Use your first name and the passcode your admin gave you.',
+    mentor: 'Use your first name and your password. The first time, use the passcode your admin gave you.',
     admin: 'Enter the admin code to see every mentor.',
     director: 'Enter your director code (IT gives it to you). You get the director dashboard plus everything on the admin page.',
     it: 'Enter the IT code. You get everything the admin has, plus status checks, cleanup and backups.',
@@ -4777,7 +4777,7 @@ function showLogin(msg) {
     ? `<div class="yl-who">${Object.keys(TEST_LISTS).map(n => `<button type="button" class="yl-person" data-who="${esc(n)}"><span class="yl-av" style="--c:${avColor(n)}">${esc(initials(n))}</span><b>${esc(n)}</b><span class="muted sm">${TEST_LISTS[n].owner ? `works with ${esc(TEST_LISTS[n].owner)}'s students` : TEST_LISTS[n].roster.length + ' students'}</span></button>`).join('')}
         <button type="button" class="yl-person" data-who=""><span class="yl-av" style="--c:#9aa0a6">+</span><b>Someone else</b><span class="muted sm">start empty</span></button></div>`
     : mode === 'mentor' ? `<label>Your name<input id="yl_name" list="yl_names" autocomplete="username" value="${esc(L.name || c.name || '')}" placeholder="e.g. Daisy" required></label><datalist id="yl_names">${known.map(n => `<option value="${esc(n)}">`).join('')}</datalist>` : '';
-  const codeField = mode === 'test' ? '' : `<label>${mode === 'mentor' ? 'Passcode' : mode === 'it' ? 'IT code' : 'Admin code'}<span class="yl-pass"><input id="yl_code" type="password" autocomplete="current-password" ${mode === 'mentor' ? 'autocapitalize="characters" spellcheck="false"' : ''} placeholder="${mode === 'admintest' ? 'optional' : mode === 'mentor' ? 'XXXX-XXXX' : ''}" ${mode === 'admintest' ? '' : 'required'}><button type="button" class="linkbtn" id="yl_show">Show</button></span></label>
+  const codeField = mode === 'test' ? '' : `<label>${mode === 'mentor' ? 'Password or passcode' : mode === 'it' ? 'IT code' : 'Admin code'}<span class="yl-pass"><input id="yl_code" type="password" autocomplete="current-password" ${mode === 'mentor' ? 'autocapitalize="off" spellcheck="false"' : ''} placeholder="${mode === 'admintest' ? 'optional' : ''}" ${mode === 'admintest' ? '' : 'required'}><button type="button" class="linkbtn" id="yl_show">Show</button></span></label>
       <label class="yl-remember"><input type="checkbox" id="yl_rem" ${L.remember === false ? '' : 'checked'}> Keep me signed in on this computer</label>`;
   el.innerHTML = `<form class="auth-card yl-card" id="yl_form" autocomplete="on">
     <div class="auth-logo"><img src="${$('.brand img')?.src || ''}" alt=""><span>Yes Calendar</span></div>
@@ -4788,7 +4788,7 @@ function showLogin(msg) {
     ${mode === 'test' ? '' : `<button class="btn primary wide" id="yl_go">${mode === 'admintest' ? 'Sign in' : 'Sign in'}</button>`}
     ${mode === 'mentor' ? '<button type="button" class="linkbtn" id="yl_offline">Use offline for now (nothing gets shared)</button>' : ''}
     ${mode === 'admintest' ? '<button type="button" class="linkbtn" id="yl_sample">Just look at the sample data</button>' : ''}
-    <p class="muted sm yl-foot">${mode === 'test' ? 'Test copy' : mode === 'mentor' ? 'Lost your passcode? Your admin can reset it and give you a new one.' : (mode === 'it' ? 'Forgot the code? It\'s in the Apps Script (IT_CODE).' : 'Forgot the code? Ask IT. It\'s in the Apps Script (BOSS_CODE).')}</p>
+    <p class="muted sm yl-foot">${mode === 'test' ? 'Test copy' : mode === 'mentor' ? 'Forgot your password? Your admin can give you a new passcode.' : (mode === 'it' ? 'Forgot the code? It\'s in the Apps Script (IT_CODE).' : 'Forgot the code? Ask IT. It\'s in the Apps Script (BOSS_CODE).')}</p>
   </form>`;
   el.hidden = false; $('#app').hidden = true;
   const done = () => { el.hidden = true; $('#app').hidden = false; renderWho(); render(); setTimeout(offerPlanner, 400); };
@@ -4815,11 +4815,11 @@ function showLogin(msg) {
     e.preventDefault();
     const name = mode === 'mentor' ? $('#yl_name').value.trim() : 'Admin', code = $('#yl_code').value.trim(), remember = $('#yl_rem').checked;
     if (mode === 'mentor' && !name) return err('Put your name in.');
-    if (!code) return mode === 'admintest' ? $('#yl_sample').click() : err(mode === 'mentor' ? 'Put your passcode in.' : 'Put the code in.');
+    if (!code) return mode === 'admintest' ? $('#yl_sample').click() : err(mode === 'mentor' ? 'Put your password in.' : 'Put the code in.');
     const btn = $('#yl_go'); btn.disabled = true; btn.textContent = 'Checking...'; err('');
     try {
       const url = syncCfg().url || TEAM_URL, boss = mode !== 'mentor', prev = syncCfg();
-      let who = name;
+      let who = name, r_mustSet = false;
       if (boss) {
         const p = await syncCall({ action: 'ping', login: true }, { url, code, role: 'boss' });
         if (mode === 'it' && p.role !== 'it') throw new Error("That's not the IT code.");
@@ -4830,7 +4830,7 @@ function showLogin(msg) {
         setSessCode(remember ? '' : code);
       } else {
         const r = await syncCall({ action: 'login', name, passcode: code, device: deviceName() }, { url, role: 'mentor' });
-        who = r.name;   // the name as the admin typed it
+        who = r.name; r_mustSet = !!r.mustSet;   // the name as the admin typed it
         switchPerson(who, prev.role === 'mentor' ? prev.name : '');
         syncSave({ ...prev, url, code: '', token: remember ? r.token : '', name: who, role: 'mentor', on: true, noIds: prev.noIds !== false });
         setSessCode(remember ? '' : r.token, 'token');
@@ -4839,6 +4839,7 @@ function showLogin(msg) {
       _mOwn = { key: null, val: null };
       await reload(); done(); SY.err = ''; SY.seen && SY.seen.clear(); syncNow(true);
       toast(boss ? 'Signed in. Loading the team...' : `Hi ${who}! You're signed in.`);
+      if (!boss && r_mustSet) showSetPassword(true);   // signed in with the admin's passcode: make their own password now
     } catch (x) { err(x.message); btn.disabled = false; btn.textContent = 'Sign in'; }
   };
 }
@@ -4856,6 +4857,52 @@ function renderWho() {
   if (L) b.title = (L.role === 'boss' ? whoLabel() : L.name) + (L.offline ? ' (offline)' : '');
 }
 const whoLabel = () => loginMode() === 'it' ? (itAs() === 'dir' ? 'Director' : itAsAdmin() ? 'Admin' : 'IT') : (syncCfg().adminWho || 'Admin');
+/* ---------- a mentor makes their own password (the admin's passcode is only for the first sign-in) ---------- */
+async function pwCheck() {
+  if (loginMode() !== 'mentor' || !syncOn() || syncCfg().role === 'boss' || !syncCfg().token && !sessCode('token')) return;
+  try { const j = await syncCall({ action: 'pw-status' }); if (j.mustSet && !$('#pw_form')) showSetPassword(true); } catch { /* next time */ }
+}
+function pwSignOut() {
+  const c = syncCfg(); syncSave({ ...c, code: '', token: '', on: c.on }); setSessCode(''); setSessCode('', 'token');
+  store.set(LOGIN_KEY, ''); try { localStorage.removeItem(LOGIN_KEY); } catch { /* ignore */ }
+  renderWho(); showLogin();
+}
+function showSetPassword(first) {
+  const L = loginInfo() || {};
+  let el = $('#yesLogin');
+  if (!el) { el = document.createElement('div'); el.id = 'yesLogin'; el.className = 'auth yes-login'; document.body.appendChild(el); }
+  el.hidden = false;
+  el.innerHTML = `<form class="auth-card yl-card" id="pw_form" autocomplete="on">
+    <div class="auth-logo"><img src="${$('.brand img')?.src || ''}" alt=""><span>Yes Calendar</span></div>
+    <h1>${first ? 'Make your password' : 'Change your password'}</h1>
+    <p class="muted">${first ? 'You signed in with the passcode your admin gave you. Now make your own password. From now on you sign in with it, and the passcode stops working.' : 'Type your current password, then the new one. You stay signed in on your other computers.'}</p>
+    <input type="text" autocomplete="username" value="${esc(L.name || '')}" hidden>
+    ${first ? '' : '<label>Current password<span class="yl-pass"><input id="pw_cur" type="password" autocomplete="current-password" required></span></label>'}
+    <label>New password<span class="yl-pass"><input id="pw_a" type="password" autocomplete="new-password" required autofocus><button type="button" class="linkbtn" id="pw_show">Show</button></span></label>
+    <label>Type it again<span class="yl-pass"><input id="pw_b" type="password" autocomplete="new-password" required></span></label>
+    <p class="muted sm" style="margin:0">At least 8 characters, with a letter and a number. Not your name.</p>
+    <div id="pw_err" class="err"></div>
+    <button class="btn primary wide" id="pw_go">Save my password</button>
+    <button type="button" class="linkbtn" id="pw_alt">${first ? 'Sign out' : 'Cancel'}</button>
+  </form>`;
+  setTimeout(() => $('#pw_a')?.focus(), 30);
+  const err = t => { $('#pw_err').textContent = t; };
+  $('#pw_show').onclick = () => { const t = $('#pw_a').type === 'password' ? 'text' : 'password'; $('#pw_a').type = t; $('#pw_b').type = t; $('#pw_show').textContent = t === 'text' ? 'Hide' : 'Show'; };
+  $('#pw_alt').onclick = () => { if (first) pwSignOut(); else { el.hidden = true; el.innerHTML = ''; } };
+  $('#pw_form').onsubmit = async e => {
+    e.preventDefault();
+    const a = $('#pw_a').value, b = $('#pw_b').value;
+    if (a.length < 8) return err('Make it at least 8 characters.');
+    if (!/[a-z]/i.test(a) || !/\d/.test(a)) return err('Use at least one letter and one number.');
+    if (a !== b) return err("The two passwords don't match.");
+    const btn = $('#pw_go'); btn.disabled = true; btn.textContent = 'Saving...'; err('');
+    try {
+      await syncCall({ action: 'pw-set', password: a, current: first ? '' : $('#pw_cur').value });
+      el.hidden = true; el.innerHTML = '';
+      toast(first ? 'Password saved. Use it next time you sign in.' : 'Password changed.', { duration: 7000 });
+    } catch (x) { err(x.message); btn.disabled = false; btn.textContent = 'Save my password'; }
+  };
+}
 function whoMenu() {
   const L = loginInfo() || {}, mode = loginMode();
   openModal(`<div class="m-head"><h2>${esc(L.role === 'boss' ? whoLabel() : L.name || '')}</h2><button class="iconbtn" data-x>✕</button></div>
@@ -4864,7 +4911,8 @@ function whoMenu() {
     ${mode === 'mentor' || mode === 'test' ? '' : ''}
     ${mode !== 'test' ? `<label class="row"><input type="checkbox" id="wo_wipe"> Also remove ${mode === 'mentor' ? 'my students and pull-outs' : 'the team data'} from this computer (for shared computers)</label>` : ''}
   </div>
-  <div class="m-foot">${mode !== 'test' && !L.sample ? '<button class="btn" data-sync style="margin-right:auto">Sharing settings</button>' : ''}<button class="btn" data-x>Close</button><button class="btn primary" data-out>Sign out</button></div>`);
+  <div class="m-foot">${mode !== 'test' && !L.sample ? '<button class="btn" data-sync style="margin-right:auto">Sharing settings</button>' : ''}${mode === 'mentor' && !L.offline ? '<button class="btn" data-pw>Change password</button>' : ''}<button class="btn" data-x>Close</button><button class="btn primary" data-out>Sign out</button></div>`);
+  $('#modal [data-pw]') && ($('#modal [data-pw]').onclick = () => { closeModal(); showSetPassword(false); });
   $$('#modal [data-x]').forEach(x => { x.onclick = () => closeModal(); });
   $('#modal [data-sync]') && ($('#modal [data-sync]').onclick = () => { closeModal(); openSync(); });
   $('#modal [data-out]').onclick = async () => {
@@ -5015,7 +5063,7 @@ async function openLogins(made) {
   if (made) { const st = (made.imported && made.imported.site) || siteFor(made.name); if (st) LOGIN_OPEN.add(st); }
   const mentorRow = (n, site) => {
     const u = userOf(n);
-    return `<div class="lg-m" data-n="${esc(n)}" data-site="${esc(site || '')}"><div><b>${esc(n)}</b> <span class="muted sm">${u ? `passcode made ${esc(syncWhen(u.made))} · ${u.devices ? `signed in on ${u.devices} device${u.devices > 1 ? 's' : ''}` : 'not signed in yet'}` : 'no passcode yet'}</span></div>
+    return `<div class="lg-m" data-n="${esc(n)}" data-site="${esc(site || '')}"><div><b>${esc(n)}</b> <span class="muted sm">${u ? `${u.own ? `made own password ${esc(syncWhen(u.made))}` : `passcode made ${esc(syncWhen(u.made))} (they make a password when they sign in)`} · ${u.devices ? `signed in on ${u.devices} device${u.devices > 1 ? 's' : ''}` : 'not signed in yet'}` : 'no passcode yet'}</span></div>
       <span class="lg-acts">${u ? `${site ? '<button class="btn sm" data-a="imp" title="Bring in their students and check-ins from their planner tab again">Import from planner</button>' : ''}<button class="btn sm" data-a="reset" title="Make a new passcode. The old one stops working.">Reset passcode</button><button class="btn sm" data-a="out" title="Sign them out on every computer">Sign out</button><button class="btn sm" data-a="del">Remove</button>`
         : `<button class="btn sm primary" data-a="make">Make passcode</button>`}</span></div>`;
   };
@@ -5032,7 +5080,7 @@ async function openLogins(made) {
   <div class="m-body">
     ${made ? `<div class="pc-card"><div class="muted sm">${made.reset ? 'New passcode' : 'Passcode'} for <b>${esc(made.name)}</b></div><div class="pc-code" id="pc_code">${esc(made.passcode)}</div>
       <div class="row" style="justify-content:center;gap:8px"><button class="btn" id="pc_copy">Copy</button></div>
-      ${made.imported ? `<div class="sm" style="margin:4px 0">${esc(importMsg(made.name, made.imported.site, made.imported))}</div>` : ''}<div class="muted sm">Give this to ${esc(made.name)}. It's only shown now. If it gets lost, just reset it.${made.reset ? ` Their old passcode stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
+      ${made.imported ? `<div class="sm" style="margin:4px 0">${esc(importMsg(made.name, made.imported.site, made.imported))}</div>` : ''}<div class="muted sm">Give this to ${esc(made.name)}. It's only shown now and it's for their first sign-in: then they make their own password. If they forget it, reset it here.${made.reset ? ` Their old password stopped working and they were signed out everywhere.` : ''}</div></div>` : ''}
     <h4 style="margin:0">Schools</h4>
     <div class="muted sm">Click a school to see its mentors.</div>
     <div class="lg-list">${sites.map(schoolBlock).join('')}</div>
@@ -5532,7 +5580,7 @@ async function reseedTeam() {
 }
 
 /* ---------- "new version ready": check the site for a newer copy of this page, offer to refresh ---------- */
-const BUILD_ID = '20261121111645';
+const BUILD_ID = '20261122131637';
 const UPD = { shown: false, last: 0 };
 async function checkForUpdate() {
   if (UPD.shown || !/^https?:/.test(location.protocol) || Date.now() - UPD.last < 60000) return;
